@@ -233,6 +233,8 @@ export default function Home() {
       if (data.agentSteps) setAgentSteps(data.agentSteps);
       if (data.logs) setLogs(data.logs);
       if (data.chat) setChat(data.chat);
+      // Stabilization 1B-1: 恢复已保存的复盘（刷新后再打开 ReviewDialog 可见）
+      if (data.review) setReview(data.review);
     } catch {
       window.localStorage.removeItem(STORAGE.key);
     }
@@ -244,12 +246,12 @@ export default function Home() {
       exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
       resources, questions, nodes, tasks, pending, notes, cards, annotations,
       activeResourceId, readerSearch, readerPage, readerZoom, favoritePages,
-      studyDays, agentSteps, logs, chat,
+      studyDays, agentSteps, logs, chat, review,
     }));
   }, [exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
       resources, questions, nodes, tasks, pending, notes, cards, annotations,
       activeResourceId, readerSearch, readerPage, readerZoom, favoritePages,
-      studyDays, agentSteps, logs, chat]);
+      studyDays, agentSteps, logs, chat, review]);
 
   // ─── Sync active subjects when subjects change ───
   useEffect(() => {
@@ -470,7 +472,8 @@ export default function Home() {
     if (!stem) return;
     const question: Question = {
       id: makeId("q"),
-      subject: String(form.get("subject") ?? subjects[0]?.name ?? ""),
+      // Stabilization 1B-2: 新题默认属于当前激活科目（不再默认 subjects[0]）
+      subject: String(form.get("subject") ?? activeKnowledgeSubject ?? subjects[0]?.name ?? ""),
       school: String(form.get("school") ?? exam.school),
       year: String(form.get("year") ?? ""),
       number: String(form.get("number") ?? ""),
@@ -495,7 +498,11 @@ export default function Home() {
     };
     setQuestions((items) => [question, ...items]);
     setPending((items) => [{ id: makeId("p"), kind: "真题识别", title: `${question.year} ${question.subject} 第 ${question.number} 题`, subject: question.subject, detail: `建议关联到 ${question.core} / ${question.branch} / ${question.knowledge}`, status: "待确认", targetId: question.id }, ...items]);
-    pushAssistant("题目已录入，进入待确认队列。");
+    // Stabilization 1B-2: 跨科目创建 → 明确跳转到该科目；同科目 → 在当前列表立即可见
+    if (question.subject !== activeKnowledgeSubject) {
+      setActiveKnowledgeSubject(question.subject);
+    }
+    pushAssistant(`题目已保存到 ${question.subject}：${question.year} 第 ${question.number} 题`);
     setActiveDialog(null);
     event.currentTarget.reset();
   }
@@ -814,9 +821,12 @@ export default function Home() {
       const resource = resources.find((item) => item.name.includes("傅献彩"));
       if (resource) {
         setActiveResourceId(resource.id);
+        setActiveKnowledgeSubject(resource.subject);
+        setActiveKnowledgePanel("resources"); // Stabilization 1B-4: 真正进入 resources/Reader，而非 landing
         setReaderPage("132");
         setActiveView("knowledge");
-        pushAssistant("傅献彩《物理化学》第六版 P132-140 已关联到 热力学 / 熵与熵变 / 熵变计算。");
+        setNotice(`已打开：${resource.name} P132-140`);
+        pushAssistant(`傅献彩《物理化学》第六版 P132-140 已关联到 热力学 / 熵与熵变 / 熵变计算。`);
       } else {
         pushAssistant("未找到傅献彩相关资源。");
       }
@@ -1017,7 +1027,14 @@ export default function Home() {
                             {task.status === "暂停" ? (
                               <>
                                 <button className="min-h-[30px] px-4 rounded-[6px] bg-[#F59E0B] text-white font-bold text-[12px]" type="button"
-                                  onClick={() => { updateTask(task.id, { status: "学习中" }); stopTimer(); }}>
+                                  onClick={() => {
+                                    // Stabilization 1B-3: 暂停后继续 → 重启 interval 并从当前 elapsedSeconds 续计（不重复创建，startTask/暂停均先 stopTimer）
+                                    updateTask(task.id, { status: "学习中" });
+                                    stopTimer();
+                                    timerIntervalRef.current = setInterval(() => {
+                                      setElapsedSeconds((prev) => prev + 1);
+                                    }, 1000);
+                                  }}>
                                   继续学习
                                 </button>
                                 <button className="min-h-[30px] px-3 rounded-[6px] bg-[#18181B] text-white font-bold text-[12px]" type="button"

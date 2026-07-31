@@ -14,8 +14,6 @@ interface ReaderPanelProps {
   readerSearch: string;
   readerPage: string;
   readerZoom: string;
-  favoritePages: string[];
-  activePageKey: string;
   relatedQuestions: Question[];
   subjectAnnotations: Annotation[];
   subjectNodes: KnowledgeNode[];
@@ -23,8 +21,6 @@ interface ReaderPanelProps {
   onSetReaderPage: (v: string) => void;
   onSetReaderZoom: (v: string) => void;
   onSaveProgress: () => void;
-  onMarkRead: () => void;
-  onToggleFavorite: () => void;
   onShowRelated: (core: string, keyword: string, subject: string) => void;
   onCreateCard: (text: string, annotation?: Annotation) => void;
   onDeleteAnnotation: (id: string) => void;
@@ -81,7 +77,7 @@ function generateAiHint(
   resource: Resource,
   nodes: KnowledgeNode[],
   questions: Question[],
-  pageNum: number
+  _pageNum: number
 ): { keyPoint: string; examFreq: string } {
   const linkedNode = resource.linkedNode || "";
   const knowledgeName = linkedNode.split("/")[2]?.trim() || resource.name || "当前内容";
@@ -132,9 +128,9 @@ function ensurePdfWorker(pdfjsLib: { GlobalWorkerOptions: { workerSrc?: string }
 
 export function ReaderPanel({
   activeResource, readerSearch, readerPage, readerZoom,
-  favoritePages, activePageKey, relatedQuestions, subjectAnnotations, subjectNodes,
+  relatedQuestions, subjectAnnotations, subjectNodes,
   onSetReaderSearch, onSetReaderPage, onSetReaderZoom,
-  onSaveProgress, onMarkRead, onToggleFavorite,
+  onSaveProgress,
   onShowRelated, onCreateCard, onDeleteAnnotation, onEditAnnotation, onJumpToPage,
   onCreateAnnotation,
 }: ReaderPanelProps) {
@@ -275,6 +271,8 @@ export function ReaderPanel({
       renderTaskRef.current?.cancel();
       renderTaskRef.current = null;
     };
+    // 仅当资源本身（id/文件）变化时才重载 PDF；lastOpenedPage 仅在加载当刻读取一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeResource?.id, activeResource?.fileStorageKey]);
 
   // ─── Stabilization 1A-2: 当前页 Canvas 渲染（含 1A-2f 单页渲染失败重试）───
@@ -320,7 +318,7 @@ export function ReaderPanel({
         } finally {
           renderTaskRef.current = null;
         }
-      } catch (err) {
+      } catch {
         if (cancelled) return;
         setPdfError(`读取本地文件失败，请重试`);
       } finally {

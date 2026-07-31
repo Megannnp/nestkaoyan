@@ -1,32 +1,27 @@
 "use client";
 
-import { useState, useRef, useEffect, type FormEvent } from "react";
+import { useState, useRef, useEffect, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
 import type {
   Risk, MasteryText, StudyMood, WorkspaceView, KnowledgePanel,
   DashboardPanel, ReviewScope, ActiveDialog, DeletedBackup,
-  ExamGoal, Subject, Resource, Question, KnowledgeNode, Task,
-  PendingItem, Review, Note, PlanLog, AppSettings, StudyDay,
-  GrowthCard, CardDeck, Annotation, AgentStep
+  ExamGoal, Resource, Question, KnowledgeNode, Task,
+  PendingItem, Review, PlanLog, StudyDay,
+  GrowthCard, Annotation, AgentStep
 } from "./lib/types";
 import {
   seedExam, seedSubjects, seedResources, seedQuestions, seedNodes,
-  seedTasks, seedNotes, seedCards, seedDecks, seedAnnotations, seedAppSettings,
+  seedTasks, seedNotes, seedCards, seedAnnotations, seedAppSettings,
   seedStudyDays
 } from "./lib/default-data";
-import { STORAGE, TASK, MASTERY, CARD_REVIEW_INTERVALS, CARD_REVIEW_LABELS, TOAST_DURATION, MAX_STUDY_DAYS, MAX_DATE_RANGE_DAYS, CHAT_KEEP_LAST, HEATMAP_SIZE } from "./lib/rules";
-import { loadData, saveData, addStructuredReview, addMemoryItem, getMemoriesByType, createEmptyMemoryData } from "./lib/storage";
+import { STORAGE, TASK, TOAST_DURATION, MAX_STUDY_DAYS, MAX_DATE_RANGE_DAYS } from "./lib/rules";
 import { savePdfFile, deletePdfFile } from "./lib/pdf-storage";
-import { extractReviewFields, extractMemories, classifyMemory, generateMemoryId, isDuplicateMemory } from "./lib/memory-rules";
-import type { StructuredReview, MemoryItem } from "./lib/types";
 import { loadLearningEvents, appendLearningEvent, type LearningEvent } from "./lib/events";
 import { computeReplayComparison, computeProgressComparison } from "./lib/replay-console";
 import { projectKnowledgeState } from "./lib/projection";
-import { s, drawerShadow } from "./lib/css-utils";
 import styles from "../styles/workspace.module.css";
 import { Sidebar } from "./components/Sidebar";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { ReviewDialog } from "./components/ReviewDialog";
-import { TaskCard } from "./components/TaskCard";
 import { CardViewer } from "./components/CardViewer";
 import { ReaderPanel } from "./components/ReaderPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -47,7 +42,8 @@ function today() {
 function dateOnly(offsetDays = 0) {
   const date = new Date();
   date.setDate(date.getDate() + offsetDays);
-  return date.toISOString().slice(0, 10);
+  // 统一按 Asia/Shanghai 计算“日期”，与 today() 保持一致（en-CA 输出 YYYY-MM-DD）
+  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
 }
 function normalizeExamGoal(goal: ExamGoal): ExamGoal {
   return { ...seedExam, ...goal, startDate: goal.startDate ?? seedExam.startDate ?? "2026-07-30" };
@@ -93,7 +89,6 @@ export default function Home() {
   const [readerSearch, setReaderSearch] = useState("");
   const [readerPage, setReaderPage] = useState(seedResources[0]?.currentPage ?? "");
   const [readerZoom, setReaderZoom] = useState("100%");
-  const [favoritePages, setFavoritePages] = useState<string[]>([]);
   const [resourceView, setResourceView] = useState<"grid" | "list">("grid");
   const [fileUploadState, setFileUploadState] = useState<{
     name: string;
@@ -102,20 +97,16 @@ export default function Home() {
     step: string;
   } | null>(null);
   const [questionFilter, setQuestionFilter] = useState({ subject: "全部", core: "全部", result: "全部", keyword: "" });
-  const [readingMode, setReadingMode] = useState(false);
   const [studyDays, setStudyDays] = useState<StudyDay[]>(seedStudyDays);
   const [learningEvents, setLearningEvents] = useState<LearningEvent[]>([]);
-  const [decks, setDecks] = useState<CardDeck[]>(seedDecks);
-  const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState(false);
-  const [cardMode, setCardMode] = useState("背诵");
+  const [cardMode] = useState("背诵");
   const [cardIndex, setCardIndex] = useState(0);
   const [cardFlipped, setCardFlipped] = useState(false);
   const [cardView, setCardView] = useState<"复习" | "管理">("复习");
   const [quickCardFront, setQuickCardFront] = useState("");
   const [quickCardBack, setQuickCardBack] = useState("");
   const [quickCardType, setQuickCardType] = useState<GrowthCard["type"]>("公式卡");
-  const [reviewTab, setReviewTab] = useState<"概览" | "填写复盘" | "AI总结">("概览");
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>([]);
   const [logs, setLogs] = useState<PlanLog[]>([
     { id: "l-1", time: today(), input: "今天只有两个小时", output: "压缩为 2 个 828 Layer 2 任务", accepted: "已接受", dataRead: ["考试日期", "当前轮次", "高风险节点"], userRevision: "无", finalResult: "生成今日任务", rating: "未评价", rework: "0" },
@@ -140,7 +131,9 @@ export default function Home() {
   const subjectCards = cards.filter((card) => card.subject === activeCardSubject);
   const dueCards = subjectCards.filter((card) => card.mastery === "不会" || card.mastery === "模糊" || card.lastReviewed === "未复习" || !card.nextReviewAt || card.nextReviewAt <= hydratedTodayStr);
   const cardQueue = dueCards.length ? dueCards : subjectCards;
-  const activeCard = cardQueue[cardIndex] || cardQueue[0];
+  // 队列变化时把 index 夹在有效范围内（派生值，避免在 effect 里 setState 造成级联渲染）
+  const clampedCardIndex = Math.min(Math.max(cardIndex, 0), Math.max(cardQueue.length - 1, 0));
+  const activeCard = cardQueue[clampedCardIndex];
   const subjectResources = resources.filter((resource) => resource.subject === activeKnowledgeSubject);
   const activeResource = subjectResources.find((resource) => resource.id === activeResourceId) ?? subjectResources[0] ?? resources[0];
   const subjectQuestions = questions.filter((question) => question.subject === activeKnowledgeSubject);
@@ -158,8 +151,12 @@ export default function Home() {
   const currentSubject = subjects.find((subject) => subject.name === activeKnowledgeSubject) ?? subjects[0];
 
   // ─── Dashboard: Timer state & refs ───
+  // 计时基于墙钟时间戳（timerRunStartEpoch），而非累加 tick，
+  // 避免标签页后台时 setInterval 被节流导致时长少算；刷新后可按时间戳恢复。
   const [timerStartTime, setTimerStartTime] = useState("");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [timerAccumSeconds, setTimerAccumSeconds] = useState(0); // 之前已计入的段落秒数
+  const [timerRunStartEpoch, setTimerRunStartEpoch] = useState(0); // 当前运行段起点 ms；0=未运行
   const timerIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   // ─── Dashboard: Completion modal state ───
@@ -167,14 +164,32 @@ export default function Home() {
   const [completionModalCustomMinutes, setCompletionModalCustomMinutes] = useState("");
   const [completionModalCustomEndTime, setCompletionModalCustomEndTime] = useState("--");
 
-  // ─── Dashboard: Task drawer ───
-  const [taskDrawerOpen, setTaskDrawerOpen] = useState<string | null>(null);
+  // ─── Sidebar heatmap tooltip（Sidebar 已实现渲染，此处补上父级状态与定位）───
+  const heatmapRef = useRef<HTMLDivElement | null>(null);
+  const [tooltipData, setTooltipData] = useState<{ date: string; top: number; left: number; above: boolean } | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+
+  function onCellMouseEnter(event: ReactMouseEvent<Element>, date: string) {
+    const aside = heatmapRef.current?.closest("aside");
+    if (!aside) return;
+    const cell = event.currentTarget.getBoundingClientRect();
+    const box = aside.getBoundingClientRect();
+    const left = Math.min(cell.left - box.left + aside.scrollLeft, box.width - 200);
+    const top = cell.top - box.top + aside.scrollTop - 46;
+    setTooltipData({ date, top, left: Math.max(4, left), above: true });
+    setTooltipVisible(true);
+  }
+  function onCellMouseLeave() {
+    setTooltipVisible(false);
+  }
 
   // ─── Dashboard: Hydration-safe date (SSR: fixed; mount: real) ───
   const [hydratedTodayStr, setHydratedTodayStr] = useState("2026-07-30");
   const [hydratedDaysLeft, setHydratedDaysLeft] = useState(143);
 
   // ─── Dashboard: Hydration effect ───
+  // 挂载后把 SSR 占位替换为真实日期/倒计时（标准 hydration 模式，需在 effect 内 setState）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setHydratedTodayStr(dateOnly());
     setHydratedDaysLeft(Math.max(0, Math.ceil((new Date(exam.examDate).getTime() - Date.now()) / 86400000)));
@@ -184,6 +199,7 @@ export default function Home() {
   useEffect(() => {
     setLearningEvents(loadLearningEvents());
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // ─── Sprint 2A/2B-1: 开发模式 Replay + Progress 对照（仅 console，不接 UI）───
   useEffect(() => {
@@ -206,6 +222,7 @@ export default function Home() {
   }, [learningEvents, nodes, subjects, questions, resources]);
 
   // ─── localStorage load (hydrate from saved state) ───
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const saved = window.localStorage.getItem(STORAGE.key);
     if (!saved) return;
@@ -228,38 +245,95 @@ export default function Home() {
       if (data.readerSearch) setReaderSearch(data.readerSearch);
       if (data.readerPage) setReaderPage(data.readerPage);
       if (data.readerZoom) setReaderZoom(data.readerZoom);
-      if (data.favoritePages) setFavoritePages(data.favoritePages);
       if (data.studyDays) setStudyDays(data.studyDays);
       if (data.agentSteps) setAgentSteps(data.agentSteps);
       if (data.logs) setLogs(data.logs);
       if (data.chat) setChat(data.chat);
       // Stabilization 1B-1: 恢复已保存的复盘（刷新后再打开 ReviewDialog 可见）
       if (data.review) setReview(data.review);
+      // 恢复正在进行的计时（#7）：运行中的段落按持久化的墙钟起点无缝续计
+      if (data.timer && data.timer.activeTimerTaskId) {
+        setActiveTimerTaskId(data.timer.activeTimerTaskId);
+        setTimerStartTime(data.timer.timerStartTime || "");
+        const accum = Number(data.timer.timerAccumSeconds || 0);
+        const startEpoch = Number(data.timer.timerRunStartEpoch || 0);
+        if (startEpoch > 0) {
+          runTimerFrom(accum, startEpoch);
+        } else {
+          setTimerAccumSeconds(accum);
+          setElapsedSeconds(accum);
+        }
+      }
     } catch {
       window.localStorage.removeItem(STORAGE.key);
     }
+    // 仅在挂载时从 localStorage 恢复一次；runTimerFrom 为稳定语义，无需列入依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  // ─── localStorage save (persist on all relevant state changes) ───
+  // ─── localStorage save (防抖持久化，避免每次按键都全量序列化写盘 #3) ───
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const latestSnapshotRef = useRef<string>("");
   useEffect(() => {
-    window.localStorage.setItem(STORAGE.key, JSON.stringify({
+    latestSnapshotRef.current = JSON.stringify({
       exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
       resources, questions, nodes, tasks, pending, notes, cards, annotations,
-      activeResourceId, readerSearch, readerPage, readerZoom, favoritePages,
+      activeResourceId, readerSearch, readerPage, readerZoom,
       studyDays, agentSteps, logs, chat, review,
-    }));
+      timer: { activeTimerTaskId, timerStartTime, timerAccumSeconds, timerRunStartEpoch },
+    });
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      try { window.localStorage.setItem(STORAGE.key, latestSnapshotRef.current); }
+      catch { /* 配额满 / 不可用时静默失败 */ }
+    }, 400);
   }, [exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
       resources, questions, nodes, tasks, pending, notes, cards, annotations,
-      activeResourceId, readerSearch, readerPage, readerZoom, favoritePages,
-      studyDays, agentSteps, logs, chat, review]);
+      activeResourceId, readerSearch, readerPage, readerZoom,
+      studyDays, agentSteps, logs, chat, review,
+      activeTimerTaskId, timerStartTime, timerAccumSeconds, timerRunStartEpoch]);
+
+  // 卸载 / 切后台时立即落盘，避免防抖窗口内的改动丢失
+  useEffect(() => {
+    function flush() {
+      if (!latestSnapshotRef.current) return;
+      try { window.localStorage.setItem(STORAGE.key, latestSnapshotRef.current); }
+      catch { /* 静默 */ }
+    }
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      document.removeEventListener("visibilitychange", flush);
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      flush();
+    };
+  }, []);
 
   // ─── Sync active subjects when subjects change ───
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (subjects.length && !subjects.some((s) => s.name === activeKnowledgeSubject))
       setActiveKnowledgeSubject(subjects[0].name);
     if (subjects.length && !subjects.some((s) => s.name === activeCardSubject))
       setActiveCardSubject(subjects[0].name);
   }, [subjects, activeKnowledgeSubject, activeCardSubject]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // ─── Toast 自动消失（notice 之前从未被渲染，现补上可见反馈 + 自动清除）───
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), TOAST_DURATION);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // ─── 删除撤销窗口：约 8 秒后关闭撤销入口 ───
+  useEffect(() => {
+    if (!lastDeleted) return;
+    const timer = setTimeout(() => setLastDeleted(null), 8000);
+    return () => clearTimeout(timer);
+  }, [lastDeleted]);
 
   // ─── Heatmap derived values ───
   const confirmedQuestions = questions.filter((q) => q.confirmed).length;
@@ -301,7 +375,7 @@ export default function Home() {
     else dayLabels.push("");
   }
   const heatmapMonths: { label: string; colSpan: number }[] = [];
-  heatmapGrid.forEach((week, wi) => {
+  heatmapGrid.forEach((week) => {
     const firstDay = week.find((d) => d !== null);
     if (!firstDay) return;
     const month = new Date(firstDay.date).getMonth() + 1;
@@ -312,7 +386,6 @@ export default function Home() {
       prevMonth.colSpan++;
     }
   });
-  const todayCardsCount = cards.filter((card) => card.createdAt.slice(0, 10) === todayStr).length;
   const cardsByDate = cards.reduce<Record<string, number>>((acc, card) => {
     const d = card.createdAt.slice(0, 10);
     acc[d] = (acc[d] || 0) + 1;
@@ -332,6 +405,26 @@ export default function Home() {
         (resources.filter((r) => r.status === "已索引").length / Math.max(resources.length, 1)) * 100 * 0.2
       )
     : 0;
+
+  function pushAssistant(text: string) {
+    setChat((items) => [...items, { role: "assistant", text }]);
+    setNotice(text);
+  }
+
+  // 撤销最近一次删除（此前 setLastDeleted 记录了备份，但没有入口消费它）
+  function restoreLastDeleted() {
+    if (!lastDeleted) return;
+    const backup = lastDeleted;
+    switch (backup.collection) {
+      case "resources": setResources((items) => [backup.item, ...items]); break;
+      case "questions": setQuestions((items) => [backup.item, ...items]); break;
+      case "nodes": setNodes((items) => [backup.item, ...items]); break;
+      case "cards": setCards((items) => [backup.item, ...items]); break;
+      case "subjects": setSubjects((items) => [...items, backup.item]); break;
+    }
+    setLastDeleted(null);
+    setNotice(`已恢复：${backup.label}`);
+  }
 
   // ─── Knowledge Center handlers ───
   function inferResource(rawName: string, subjectHint: string) {
@@ -644,23 +737,35 @@ export default function Home() {
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
+    // moveCard/reviewCard 每次渲染重建但语义稳定；此处依赖已覆盖会影响行为的状态
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, cardView, activeCard, cardQueue, cardFlipped]);
-
-  // 索引校正：队列变化时避免越界
-  useEffect(() => {
-    if (cardQueue.length === 0) { setCardIndex(0); return; }
-    setCardIndex((idx) => Math.min(Math.max(idx, 0), Math.max(cardQueue.length - 1, 0)));
-  }, [cardQueue.length]);
 
   // ─── Dashboard handlers ───
   function updateTask(id: string, patch: Partial<Task>) {
     setTasks((items) => items.map((task) => task.id === id ? { ...task, ...patch } : task));
   }
 
+  // 每个任务对某一天的学习记录只计一次，避免反复勾选/多入口重复累加（#8）
+  function recordTaskDone(task: Task, minutes: number) {
+    const date = dateOnly();
+    if (task.countedForDate === date) return;
+    recordStudyDay(minutes, 1);
+    updateTask(task.id, { countedForDate: date });
+  }
+
+  function recordTaskUndone(task: Task) {
+    if (!task.countedForDate) return;
+    const minutes = Number(task.actualMinutes || task.minutes || 0);
+    recordStudyDay(-minutes, -1); // 反向抵扣当天的计入
+    updateTask(task.id, { countedForDate: "" });
+  }
+
   function toggleTaskDone(task: Task) {
     const nextDone = !task.done;
     updateTask(task.id, { done: nextDone });
-    if (nextDone) recordStudyDay(task.actualMinutes !== "" ? Number(task.actualMinutes) : (task.minutes || 0), 1);
+    if (nextDone) recordTaskDone(task, task.actualMinutes !== "" ? Number(task.actualMinutes) : (task.minutes || 0));
+    else recordTaskUndone(task);
   }
 
   function moveTask(id: string, direction: -1 | 1) {
@@ -681,25 +786,56 @@ export default function Home() {
     }
   }
 
+  // 以给定起点（墙钟 ms）开始/恢复一个运行段；interval 仅按时间戳重算显示值，
+  // 因此后台节流也不会少算，刷新后用持久化的起点即可无缝续计。
+  function runTimerFrom(accumSeconds: number, startEpoch: number) {
+    setTimerAccumSeconds(accumSeconds);
+    setTimerRunStartEpoch(startEpoch);
+    const compute = () => accumSeconds + Math.max(0, Math.floor((Date.now() - startEpoch) / 1000));
+    setElapsedSeconds(compute());
+    stopTimer();
+    timerIntervalRef.current = setInterval(() => setElapsedSeconds(compute()), 1000);
+  }
+
+  // 当前真实已学秒数（不依赖 interval 的最后一次 tick）
+  function currentElapsedSeconds() {
+    return timerRunStartEpoch > 0
+      ? timerAccumSeconds + Math.max(0, Math.floor((Date.now() - timerRunStartEpoch) / 1000))
+      : timerAccumSeconds;
+  }
+
   function startTask(task: Task) {
     const now = new Date();
     const startTimeStr = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
     setTimerStartTime(startTimeStr);
-    setElapsedSeconds(0);
     setActiveTimerTaskId(task.id);
     setCompletionModalAllowEditTime(false);
     setCompletionModalCustomMinutes("");
     updateTask(task.id, { status: "学习中", startedAt: startTimeStr });
-    stopTimer();
-    timerIntervalRef.current = setInterval(() => {
-      setElapsedSeconds((prev) => prev + 1);
-    }, 1000);
+    runTimerFrom(0, Date.now());
     setNotice(`开始学习：${task.title}`);
+  }
+
+  function pauseTimer(task: Task) {
+    stopTimer();
+    const total = currentElapsedSeconds();
+    setTimerAccumSeconds(total);
+    setTimerRunStartEpoch(0);
+    setElapsedSeconds(total);
+    updateTask(task.id, { status: "暂停" });
+  }
+
+  function resumeTimer(task: Task) {
+    updateTask(task.id, { status: "学习中" });
+    runTimerFrom(timerAccumSeconds, Date.now());
   }
 
   function handleEndLearning(task: Task) {
     stopTimer();
-    const elapsedMin = Math.max(TASK.minElapsedMinutes, Math.round(elapsedSeconds / 60));
+    const totalSeconds = currentElapsedSeconds();
+    setElapsedSeconds(totalSeconds);
+    setTimerRunStartEpoch(0);
+    const elapsedMin = Math.max(TASK.minElapsedMinutes, Math.round(totalSeconds / 60));
     setCompletionModalCustomMinutes(String(elapsedMin));
     setCompletionModalAllowEditTime(false);
     setCompletionModalCustomEndTime(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" }));
@@ -719,7 +855,7 @@ export default function Home() {
       actualMinutes: actualMinutesValue,
       completedAt: endTimeStr,
     });
-    recordStudyDay(Number(actualMinutesValue || task.minutes || 0), task.done ? 0 : 1);
+    recordTaskDone(task, Number(actualMinutesValue || task.minutes || 0));
     const accuracyNumber = Number(task.accuracy || 0);
     // LearningEvent: study_completed（Sprint 1 / Phase A，纯副作用采集）
     setLearningEvents((prev) => appendLearningEvent(prev, {
@@ -860,11 +996,6 @@ export default function Home() {
     pushAssistant("已收到。可以继续让我安排任务、检索真题、生成笔记或调整图谱。");
   }
 
-  function pushAssistant(text: string) {
-    setChat((items) => [...items, { role: "assistant", text }]);
-    setNotice(text);
-  }
-
   function addLog(input: string, output: string, accepted = "自动生成", dataRead = ["考试日期", "科目状态", "学习历史", "高风险节点"]) {
     setLogs((items) => [{ id: makeId("l"), time: today(), input, output, accepted, dataRead, userRevision: "待记录", finalResult: output, rating: "未评价", rework: "0" }, ...items]);
   }
@@ -874,8 +1005,8 @@ export default function Home() {
     setStudyDays((items) => {
       const exists = items.some((item) => item.date === date);
       const next = exists
-        ? items.map((item) => item.date === date ? { ...item, completed: item.completed + completedDelta, minutes: item.minutes + minutes } : item)
-        : [...items, { date, completed: completedDelta, minutes }];
+        ? items.map((item) => item.date === date ? { ...item, completed: Math.max(0, item.completed + completedDelta), minutes: Math.max(0, item.minutes + minutes) } : item)
+        : [...items, { date, completed: Math.max(0, completedDelta), minutes: Math.max(0, minutes) }];
       return next.slice(-MAX_STUDY_DAYS);
     });
   }
@@ -885,12 +1016,12 @@ export default function Home() {
       <Sidebar
         daysLeft={daysLeft} exam={exam} totalTargetScore={totalTargetScore} overallProgress={overallProgress}
         heatmapStartFormatted={heatmapStartFormatted} heatmapMonths={heatmapMonths} dayLabels={dayLabels} heatmapGrid={heatmapGrid}
-        todayStr={todayStr} examDate={exam.examDate} tooltipData={null} tooltipVisible={false}
+        todayStr={todayStr} examDate={exam.examDate} tooltipData={tooltipData} tooltipVisible={tooltipVisible}
         heatmapDays={heatmapDays} cardsByDate={cardsByDate}
         activeView={activeView} setActiveView={setActiveView}
-        heatmapRef={useRef<HTMLDivElement | null>(null)}
-        onCellMouseEnter={() => {}} onCellMouseLeave={() => {}} onCellClick={() => {}}
-        setTooltipVisible={() => {}} setTooltipData={() => {}}
+        heatmapRef={heatmapRef}
+        onCellMouseEnter={onCellMouseEnter} onCellMouseLeave={onCellMouseLeave} onCellClick={onCellMouseEnter}
+        setTooltipVisible={setTooltipVisible} setTooltipData={setTooltipData}
       />
 
       <div className={styles.mainContent}>
@@ -1027,14 +1158,7 @@ export default function Home() {
                             {task.status === "暂停" ? (
                               <>
                                 <button className="min-h-[30px] px-4 rounded-[6px] bg-[#F59E0B] text-white font-bold text-[12px]" type="button"
-                                  onClick={() => {
-                                    // Stabilization 1B-3: 暂停后继续 → 重启 interval 并从当前 elapsedSeconds 续计（不重复创建，startTask/暂停均先 stopTimer）
-                                    updateTask(task.id, { status: "学习中" });
-                                    stopTimer();
-                                    timerIntervalRef.current = setInterval(() => {
-                                      setElapsedSeconds((prev) => prev + 1);
-                                    }, 1000);
-                                  }}>
+                                  onClick={() => resumeTimer(task)}>
                                   继续学习
                                 </button>
                                 <button className="min-h-[30px] px-3 rounded-[6px] bg-[#18181B] text-white font-bold text-[12px]" type="button"
@@ -1044,7 +1168,7 @@ export default function Home() {
                               <>
                                 <button className="min-h-[30px] px-4 rounded-[6px] bg-[#0F766E] text-white font-bold text-[12px]" type="button">⏱ 学习中</button>
                                 <button className="min-h-[30px] px-3 rounded-[6px] bg-[#F4F4F5] text-[#18181B] font-bold text-[12px]" type="button"
-                                  onClick={() => { stopTimer(); updateTask(task.id, { status: "暂停" }); }}>暂停</button>
+                                  onClick={() => pauseTimer(task)}>暂停</button>
                                 <button className="min-h-[30px] px-3 rounded-[6px] bg-[#18181B] text-white font-bold text-[12px]" type="button"
                                   onClick={() => handleEndLearning(task)}>结束学习</button>
                               </>
@@ -1345,7 +1469,6 @@ export default function Home() {
                         <ReaderPanel
                           activeResource={activeResource}
                           readerSearch={readerSearch} readerPage={readerPage} readerZoom={readerZoom}
-                          favoritePages={favoritePages} activePageKey={`${activeResource.id}-${readerPage}`}
                           relatedQuestions={relatedQuestions}
                           subjectAnnotations={subjectAnnotations}
                           subjectNodes={subjectNodes}
@@ -1353,7 +1476,6 @@ export default function Home() {
                           onSetReaderZoom={setReaderZoom} onSaveProgress={() => {
                             setResources((items) => items.map((item) => item.id === activeResource.id ? { ...item, readingMinutes: String(Math.max(Number(item.readingMinutes || 0), Math.round(elapsedSeconds / 60))) } : item));
                           }}
-                          onMarkRead={() => {}} onToggleFavorite={() => {}}
                           onShowRelated={showRelatedQuestions}
                           onCreateCard={(text, annotation) => { createCardFromText("资料批注", text, annotation); setActiveView("cards"); setCardView("复习"); }}
                           onCreateAnnotation={onCreateAnnotation}
@@ -1573,7 +1695,7 @@ export default function Home() {
               activeCard ? (
                 <CardViewer
                   activeCard={activeCard}
-                  cardIndex={cardIndex} cardQueue={cardQueue}
+                  cardIndex={clampedCardIndex} cardQueue={cardQueue}
                   cardFlipped={cardFlipped} cardMode={cardMode}
                   onFlip={() => setCardFlipped(!cardFlipped)}
                   onMove={moveCard}
@@ -1787,6 +1909,26 @@ export default function Home() {
           />
         )}
       </div>
+
+      {/* ─── 全局 Toast + 删除撤销（此前 notice / lastDeleted 均无渲染入口）─── */}
+      {(notice || lastDeleted) && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed left-1/2 -translate-x-1/2 bottom-6 z-[100] flex items-center gap-3 max-w-[90vw] px-4 py-2.5 rounded-[10px] bg-[#18181B] text-white shadow-lg"
+        >
+          {notice && <span className="text-[13px] leading-snug">{notice}</span>}
+          {lastDeleted && (
+            <button
+              type="button"
+              className="text-[12px] font-bold px-2 py-1 rounded-[6px] bg-white/15 hover:bg-white/25 shrink-0"
+              onClick={restoreLastDeleted}
+            >
+              撤销删除
+            </button>
+          )}
+        </div>
+      )}
     </main>
   );
 }

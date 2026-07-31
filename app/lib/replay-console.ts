@@ -39,7 +39,6 @@ export function computeReplayComparison(
 
   // 对照表：Current（nodes 现有）vs Projected
   const discrepancies: string[] = [];
-  // eslint-disable-next-line no-console
   console.group("[MemoryEngine] Replay Memory（Sprint 2A 开发对照）");
   for (const n of nodes) {
     const state = projected.find((p) => p.nodeId === n.id);
@@ -52,22 +51,17 @@ export function computeReplayComparison(
         `  ${n.subject} / ${n.knowledge}: Current ${currentMastery} → Projected ${projectedMastery} (${diff > 0 ? "+" : ""}${diff})`
       );
     }
-    // eslint-disable-next-line no-console
     console.log(`  ${n.subject} / ${n.knowledge}: Current ${currentMastery} | Projected ${projectedMastery}`);
   }
   if (discrepancies.length > 0) {
-    // eslint-disable-next-line no-console
     console.warn("  差异明细：");
     for (const line of discrepancies) {
-      // eslint-disable-next-line no-console
       console.warn(line);
     }
   }
-  // eslint-disable-next-line no-console
   console.log(
     `Replay Finished | Events: ${events.length} | Nodes: ${projected.length} | Updated: ${nodesUpdated} | Warnings: ${discrepancies.length}`
   );
-  // eslint-disable-next-line no-console
   console.groupEnd();
 
   return {
@@ -109,19 +103,13 @@ export function computeProgressComparison(
     legacy.totalResources
   );
 
-  // eslint-disable-next-line no-console
   console.group("[MemoryEngine] Dashboard Progress 对照（Sprint 2B-1 开发模式）");
-  // eslint-disable-next-line no-console
   console.log(`  Legacy Progress:     ${legacyProgress}%`);
-  // eslint-disable-next-line no-console
   console.log(`  Projected Progress:  ${projectedResult.progress}%`);
-  // eslint-disable-next-line no-console
   console.log(`  Effective Subjects:  ${projectedResult.effectiveSubjects} | Skipped (未观测): ${projectedResult.skippedSubjects}`);
   if (legacyProgress !== projectedResult.progress) {
-    // eslint-disable-next-line no-console
     console.warn(`  ⚠ 差异 ${projectedResult.progress - legacyProgress > 0 ? "+" : ""}${projectedResult.progress - legacyProgress} 个百分点（观察期，不影响 UI）`);
   }
-  // eslint-disable-next-line no-console
   console.groupEnd();
 
   return {

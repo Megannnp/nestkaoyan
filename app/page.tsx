@@ -122,6 +122,7 @@ export default function Home() {
   const reviewAiSummary = `今日完成 ${reviewCompletedTasks} 个任务，掌握度变化 ${Math.round(reviewMasteryDelta)}%。`;
   const activeCard = cards[cardIndex] || cards[0];
   const activeResource = resources.find((r) => r.id === activeResourceId) || resources[0];
+  const activeTask = tasks.find((task) => task.id === activeTaskId);
 
   // ─── Dashboard: Timer state & refs ───
   const [timerStartTime, setTimerStartTime] = useState("");
@@ -452,14 +453,10 @@ export default function Home() {
               <div className="section-label">AI Workspace</div>
               <h1>AI 学习助手</h1>
               <div className="quick-prompts">
-                {quickPrompts.map((prompt) => (
+                {["今天学什么", "我现在属于第几轮"].map((prompt) => (
                   <button key={prompt} onClick={() => {
                     if (prompt === "今天学什么") generatePlan();
-                    else if (prompt === "我现在属于第几轮") {
-                      pushAssistant(`当前主要科目处于 ${subjects[0]?.round ?? "第一轮"}，${subjects[0]?.layer ?? "Layer 1"}。`);
-                    } else {
-                      pushAssistant(`已收到请求。${prompt} 功能需要在完整 Agent 页面中运行。`);
-                    }
+                    else pushAssistant(`当前主要科目处于 ${subjects[0]?.round ?? "第一轮"}，${subjects[0]?.layer ?? "Layer 1"}。`);
                   }}>{prompt}</button>
                 ))}
               </div>
@@ -479,6 +476,7 @@ export default function Home() {
                   <div className={`bubble ${message.role}`} key={`${message.text}-${index}`}>{message.text}</div>
                 ))}
               </div>
+              {/* 其余 quick prompts 依赖 Agent 运行时，Phase 2 恢复 */}
             </div>
 
             {/* Engine Panel — Tasks */}
@@ -691,6 +689,63 @@ export default function Home() {
             )}
             onRemoveSubject={(id) => setSubjects((prev) => prev.filter((s) => s.id !== id))}
           />
+        )}
+
+        {/* ─── Completion Modal (Task result dialog) ─── */}
+        {activeDialog === "task" && activeTask && (
+          <div className="modal-backdrop" role="presentation" onClick={() => setActiveDialog(null)}>
+            <section className="modal-panel compact-modal" role="dialog" aria-modal="true" aria-label="记录学习结果" onClick={(event) => event.stopPropagation()}>
+              <div className="modal-head">
+                <div><span>今日任务</span><strong>{activeTask.title}</strong></div>
+                <button onClick={() => setActiveDialog(null)}>关闭</button>
+              </div>
+              <div className="mini-form modal-form">
+                {/* 时间信息 — 自动计算，可编辑 */}
+                <div className="p-3 mb-3 rounded-[8px] bg-[#F4F4F5]">
+                  <div className="text-[11px] font-bold text-[#52525B] mb-2">本次学习</div>
+                  <div className="flex items-center gap-4 text-[12px]">
+                    <span>开始 <strong>{activeTask.startedAt || timerStartTime || "--"}</strong></span>
+                    <span>结束 <strong>{completionModalCustomEndTime}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1.5 text-[12px]">
+                    <span>实际</span>
+                    {completionModalAllowEditTime ? (
+                      <input
+                        className="w-[60px] min-h-[28px] text-[13px] text-center rounded border border-[#D4D4D8]"
+                        value={completionModalCustomMinutes}
+                        onChange={(e) => setCompletionModalCustomMinutes(e.target.value)}
+                        autoFocus
+                      />
+                    ) : (
+                      <strong className="text-[#0F766E]">{completionModalCustomMinutes} 分钟</strong>
+                    )}
+                    <span className="text-[#71717A]">分钟</span>
+                    {!completionModalAllowEditTime ? (
+                      <button
+                        className="text-[11px] px-1.5 py-0.5 rounded bg-white text-[#71717A] hover:text-[#18181B] border border-[#D4D4D8]"
+                        onClick={() => setCompletionModalAllowEditTime(true)}
+                      >
+                        ✏ 编辑
+                      </button>
+                    ) : (
+                      <button
+                        className="text-[11px] px-1.5 py-0.5 rounded bg-white text-[#0F766E] border border-[#0F766E]"
+                        onClick={() => setCompletionModalAllowEditTime(false)}
+                      >
+                        确认
+                      </button>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-[#A1A1AA] mt-1">如中途暂停或接电话可点击编辑修改时间</div>
+                </div>
+                <label><span>掌握程度</span><select value={activeTask.mastery} onChange={(event) => updateTask(activeTask.id, { mastery: event.target.value as MasteryText })}>{masteryOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
+                <label><span>正确率%</span><input value={activeTask.accuracy} onChange={(event) => updateTask(activeTask.id, { accuracy: event.target.value })} placeholder="可选" /></label>
+                <label><span>学习状态</span><select value={activeTask.mood} onChange={(event) => updateTask(activeTask.id, { mood: event.target.value as StudyMood })}>{moodOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
+                <label className="wide-field"><span>困难/错因</span><input value={activeTask.note} onChange={(event) => updateTask(activeTask.id, { note: event.target.value })} placeholder="例如：判断过程类型时容易混淆" /></label>
+                <button onClick={() => { completeTask(activeTask.id); setActiveDialog(null); }} type="button">保存并完成</button>
+              </div>
+            </section>
+          </div>
         )}
 
         {/* Review Dialog */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, type FormEvent } from "react";
+import { useState, useRef, useEffect, type FormEvent } from "react";
 import type {
   MasteryText, StudyMood, WorkspaceView, KnowledgePanel,
   DashboardPanel, ReviewScope, ActiveDialog, DeletedBackup,
@@ -18,6 +18,7 @@ import { loadData, saveData, addStructuredReview, addMemoryItem, getMemoriesByTy
 import { extractReviewFields, extractMemories, classifyMemory, generateMemoryId, isDuplicateMemory } from "./lib/memory-rules";
 import type { StructuredReview, MemoryItem } from "./lib/types";
 import { s, drawerShadow } from "./lib/css-utils";
+import styles from "../styles/workspace.module.css";
 import { Sidebar } from "./components/Sidebar";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { ReviewDialog } from "./components/ReviewDialog";
@@ -122,56 +123,501 @@ export default function Home() {
   const activeCard = cards[cardIndex] || cards[0];
   const activeResource = resources.find((r) => r.id === activeResourceId) || resources[0];
 
-  // Placeholder timers & data for components that need them
-  const timerStartTime = "";
-  const elapsedSeconds = 0;
+  // ─── Dashboard: Timer state & refs ───
+  const [timerStartTime, setTimerStartTime] = useState("");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
-  // --- Task Card handlers (wired to state) ---
-  const toggleTaskDone = (task: Task) => {
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, done: !t.done } : t)));
-  };
-  const updateTask = (id: string, patch: Partial<Task>) => {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
-  };
+  // ─── Dashboard: Completion modal state ───
+  const [completionModalAllowEditTime, setCompletionModalAllowEditTime] = useState(false);
+  const [completionModalCustomMinutes, setCompletionModalCustomMinutes] = useState("");
+  const [completionModalCustomEndTime, setCompletionModalCustomEndTime] = useState("--");
+
+  // ─── Dashboard: Task drawer ───
+  const [taskDrawerOpen, setTaskDrawerOpen] = useState<string | null>(null);
+
+  // ─── Dashboard: Hydration-safe date (SSR: fixed; mount: real) ───
+  const [hydratedTodayStr, setHydratedTodayStr] = useState("2026-07-30");
+  const [hydratedDaysLeft, setHydratedDaysLeft] = useState(143);
+
+  // ─── Dashboard: Hydration effect ───
+  useEffect(() => {
+    setHydratedTodayStr(dateOnly());
+    setHydratedDaysLeft(Math.max(0, Math.ceil((new Date(exam.examDate).getTime() - Date.now()) / 86400000)));
+  }, [exam.examDate]);
+
+  // ─── localStorage load (hydrate from saved state) ───
+  useEffect(() => {
+    const saved = window.localStorage.getItem(STORAGE.key);
+    if (!saved) return;
+    try {
+      const data = JSON.parse(saved);
+      if (data.exam) setExam(normalizeExamGoal(data.exam));
+      if (data.appSettings) setAppSettings(data.appSettings);
+      if (data.subjects) setSubjects(data.subjects);
+      if (data.activeKnowledgeSubject) setActiveKnowledgeSubject(data.activeKnowledgeSubject);
+      if (data.activeCardSubject) setActiveCardSubject(data.activeCardSubject);
+      if (data.resources) setResources(data.resources);
+      if (data.questions) setQuestions(data.questions);
+      if (data.nodes) setNodes(data.nodes);
+      if (data.tasks) setTasks(data.tasks);
+      if (data.pending) setPending(data.pending);
+      if (data.notes) setNotes(data.notes);
+      if (data.cards) setCards(data.cards);
+      if (data.annotations) setAnnotations(data.annotations);
+      if (data.activeResourceId) setActiveResourceId(data.activeResourceId);
+      if (data.readerSearch) setReaderSearch(data.readerSearch);
+      if (data.readerPage) setReaderPage(data.readerPage);
+      if (data.readerZoom) setReaderZoom(data.readerZoom);
+      if (data.favoritePages) setFavoritePages(data.favoritePages);
+      if (data.studyDays) setStudyDays(data.studyDays);
+      if (data.agentSteps) setAgentSteps(data.agentSteps);
+      if (data.logs) setLogs(data.logs);
+      if (data.chat) setChat(data.chat);
+    } catch {
+      window.localStorage.removeItem(STORAGE.key);
+    }
+  }, []);
+
+  // ─── localStorage save (persist on all relevant state changes) ───
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE.key, JSON.stringify({
+      exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
+      resources, questions, nodes, tasks, pending, notes, cards, annotations,
+      activeResourceId, readerSearch, readerPage, readerZoom, favoritePages,
+      studyDays, agentSteps, logs, chat,
+    }));
+  }, [exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
+      resources, questions, nodes, tasks, pending, notes, cards, annotations,
+      activeResourceId, readerSearch, readerPage, readerZoom, favoritePages,
+      studyDays, agentSteps, logs, chat]);
+
+  // ─── Sync active subjects when subjects change ───
+  useEffect(() => {
+    if (subjects.length && !subjects.some((s) => s.name === activeKnowledgeSubject))
+      setActiveKnowledgeSubject(subjects[0].name);
+    if (subjects.length && !subjects.some((s) => s.name === activeCardSubject))
+      setActiveCardSubject(subjects[0].name);
+  }, [subjects, activeKnowledgeSubject, activeCardSubject]);
+
+  // ─── Heatmap derived values ───
+  const confirmedQuestions = questions.filter((q) => q.confirmed).length;
+  const heatmapStart = exam.examGoalCreatedAt ?? hydratedTodayStr;
+  const heatmapEnd = exam.examDate >= hydratedTodayStr ? exam.examDate : hydratedTodayStr;
+  const heatmapDates = dateRange(heatmapStart, heatmapEnd);
+  const heatmapDays = heatmapDates.map((date) => {
+    const dayData = studyDays.find((d) => d.date === date);
+    return { date, completed: dayData?.completed ?? 0, minutes: dayData?.minutes ?? 0 };
+  });
+  const heatmapTotalDays = heatmapDays.length;
+  const monthNames = ["", "1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
+  const heatmapStartFormatted = `${heatmapStart.split("-")[0]}.${heatmapStart.split("-")[1]}.${heatmapStart.split("-")[2]}`;
+  const startDayOfWeek = new Date(heatmapStart).getDay();
+  const monBasedOffset = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+  const totalSlots = heatmapTotalDays + monBasedOffset;
+  const heatmapWeeks = Math.ceil(totalSlots / 7);
+  const heatmapGrid: ({ date: string; completed: number; minutes: number } | null)[][] = [];
+  for (let w = 0; w < heatmapWeeks; w++) {
+    const week: ({ date: string; completed: number; minutes: number } | null)[] = [];
+    for (let d = 0; d < 7; d++) {
+      const slotIndex = w * 7 + d;
+      if (slotIndex < monBasedOffset) {
+        week.push(null);
+      } else {
+        const dayIndex = slotIndex - monBasedOffset;
+        if (dayIndex < heatmapTotalDays) {
+          week.push(heatmapDays[dayIndex]);
+        }
+      }
+    }
+    heatmapGrid.push(week);
+  }
+  const todayStr = hydratedTodayStr;
+  const dayLabels: string[] = [];
+  const weekDays = ["一", "二", "三", "四", "五"];
+  for (let i = 0; i < 7; i++) {
+    if (i > 0 && i < 6) dayLabels.push(weekDays[i - 1]);
+    else dayLabels.push("");
+  }
+  const heatmapMonths: { label: string; colSpan: number }[] = [];
+  heatmapGrid.forEach((week, wi) => {
+    const firstDay = week.find((d) => d !== null);
+    if (!firstDay) return;
+    const month = new Date(firstDay.date).getMonth() + 1;
+    const prevMonth = heatmapMonths.length > 0 ? heatmapMonths[heatmapMonths.length - 1] : null;
+    if (!prevMonth || prevMonth.label !== monthNames[month]) {
+      heatmapMonths.push({ label: monthNames[month], colSpan: 1 });
+    } else {
+      prevMonth.colSpan++;
+    }
+  });
+  const todayCardsCount = cards.filter((card) => card.createdAt.slice(0, 10) === todayStr).length;
+  const cardsByDate = cards.reduce<Record<string, number>>((acc, card) => {
+    const d = card.createdAt.slice(0, 10);
+    acc[d] = (acc[d] || 0) + 1;
+    return acc;
+  }, {});
+
+  // --- Computed values for Sidebar ---
+  const daysLeft = hydratedDaysLeft;
+  const totalTargetScore = subjects.reduce(
+    (sum, subject) => sum + Number(subject.targetScore || 0),
+    0
+  );
+  const overallProgress = nodes.length > 0
+    ? Math.round(
+        (nodes.reduce((sum, node) => sum + node.masteryScore, 0) / Math.max(nodes.length, 1)) * 0.55 +
+        (confirmedQuestions / Math.max(questions.length, 1)) * 100 * 0.25 +
+        (resources.filter((r) => r.status === "已索引").length / Math.max(resources.length, 1)) * 100 * 0.2
+      )
+    : 0;
+
+  // ─── Dashboard handlers ───
+  function updateTask(id: string, patch: Partial<Task>) {
+    setTasks((items) => items.map((task) => task.id === id ? { ...task, ...patch } : task));
+  }
+
+  function toggleTaskDone(task: Task) {
+    const nextDone = !task.done;
+    updateTask(task.id, { done: nextDone });
+    if (nextDone) recordStudyDay(task.actualMinutes !== "" ? Number(task.actualMinutes) : (task.minutes || 0), 1);
+  }
+
+  function moveTask(id: string, direction: -1 | 1) {
+    setTasks((items) => {
+      const index = items.findIndex((task) => task.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= items.length) return items;
+      const next = [...items];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  function stopTimer() {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = undefined;
+    }
+  }
+
+  function startTask(task: Task) {
+    const now = new Date();
+    const startTimeStr = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+    setTimerStartTime(startTimeStr);
+    setElapsedSeconds(0);
+    setActiveTimerTaskId(task.id);
+    setCompletionModalAllowEditTime(false);
+    setCompletionModalCustomMinutes("");
+    updateTask(task.id, { status: "学习中", startedAt: startTimeStr });
+    stopTimer();
+    timerIntervalRef.current = setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+    setNotice(`开始学习：${task.title}`);
+  }
+
+  function handleEndLearning(task: Task) {
+    stopTimer();
+    const elapsedMin = Math.max(TASK.minElapsedMinutes, Math.round(elapsedSeconds / 60));
+    setCompletionModalCustomMinutes(String(elapsedMin));
+    setCompletionModalAllowEditTime(false);
+    setCompletionModalCustomEndTime(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" }));
+    setActiveTaskId(task.id);
+    setActiveDialog("task");
+    setActiveTimerTaskId("");
+  }
+
+  function completeTask(id: string) {
+    const task = tasks.find((item) => item.id === id);
+    if (!task) return;
+    const actualMinutesValue = completionModalAllowEditTime ? completionModalCustomMinutes : (task.actualMinutes || String(Math.max(1, Math.round(elapsedSeconds / 60))));
+    const endTimeStr = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+    updateTask(id, {
+      done: true,
+      status: "已完成",
+      actualMinutes: actualMinutesValue,
+      completedAt: endTimeStr,
+    });
+    recordStudyDay(Number(actualMinutesValue || task.minutes || 0), task.done ? 0 : 1);
+    const accuracyNumber = Number(task.accuracy || 0);
+    if (accuracyNumber && accuracyNumber < 60) {
+      setNodes((items) => items.map((node) =>
+        node.knowledge === task.branch || node.core === task.core
+          ? { ...node, masteryScore: Math.max(0, node.masteryScore - 8), masteryLevel: Math.max(0, node.masteryLevel - 1), mistakes: node.mistakes + 1, reviewRisk: "高风险" }
+          : node
+      ));
+    }
+  }
+
+  function generatePlan(input = "手动重新安排今天") {
+    const highRiskNode = nodes.find((node) => node.reviewRisk === "高风险") ?? nodes[0];
+    if (!highRiskNode) return;
+    const nextTasks: Task[] = [{
+      id: makeId("t"),
+      title: `回看 ${highRiskNode.knowledge}`,
+      subject: highRiskNode.subject,
+      core: highRiskNode.core,
+      branch: highRiskNode.branch,
+      round: highRiskNode.round,
+      layer: highRiskNode.layer,
+      source: resources.find((r) => r.subject === highRiskNode.subject)?.name ?? "已上传资料",
+      range: "关联章节和错题",
+      minutes: 60,
+      standard: "能够复述核心条件并完成相似题。",
+      reason: `${highRiskNode.knowledge} 错题 ${highRiskNode.mistakes} 次，遗忘风险 ${highRiskNode.reviewRisk}。`,
+      backup: "",
+      done: false,
+      actualMinutes: "",
+      difficulty: "2",
+      mastery: "有些模糊",
+      accuracy: "",
+      needReview: true,
+      mood: "正常",
+      note: "",
+      status: "待开始",
+      aiRecommended: true,
+      aiReasonForgetRate: `遗忘风险 ${highRiskNode.reviewRisk}`,
+      aiReasonLayerStable: `${highRiskNode.layer} 尚未稳定`,
+      aiReasonMistakeCount: `错题 ${highRiskNode.mistakes} 次`,
+      aiReasonExamFrequency: "属于高频考点",
+      startedAt: "",
+      estimatedCompletionMinutes: 60,
+      masteryBefore: highRiskNode.masteryScore,
+      masteryAfter: Math.min(100, highRiskNode.masteryScore + 20),
+      completedAt: "",
+      relatedCardIds: [],
+      relatedQuestionIds: [],
+    }];
+    setTasks(nextTasks);
+    addLog(input, `生成 ${nextTasks.length} 个任务，优先 ${highRiskNode.core} / ${highRiskNode.knowledge}`);
+  }
+
+  function pushAssistant(text: string) {
+    setChat((items) => [...items, { role: "assistant", text }]);
+    setNotice(text);
+  }
+
+  function addLog(input: string, output: string, accepted = "自动生成", dataRead = ["考试日期", "科目状态", "学习历史", "高风险节点"]) {
+    setLogs((items) => [{ id: makeId("l"), time: today(), input, output, accepted, dataRead, userRevision: "待记录", finalResult: output, rating: "未评价", rework: "0" }, ...items]);
+  }
+
+  function recordStudyDay(minutes = 0, completedDelta = 0) {
+    const date = dateOnly();
+    setStudyDays((items) => {
+      const exists = items.some((item) => item.date === date);
+      const next = exists
+        ? items.map((item) => item.date === date ? { ...item, completed: item.completed + completedDelta, minutes: item.minutes + minutes } : item)
+        : [...items, { date, completed: completedDelta, minutes }];
+      return next.slice(-MAX_STUDY_DAYS);
+    });
+  }
 
   return (
     <main>
       <Sidebar
-        daysLeft={0} exam={exam} totalTargetScore={0} overallProgress={0}
-        heatmapStartFormatted="" heatmapMonths={[]} dayLabels={[]} heatmapGrid={[]}
-        todayStr="" examDate="" tooltipData={null} tooltipVisible={false}
-        heatmapDays={[]} cardsByDate={{}}
+        daysLeft={daysLeft} exam={exam} totalTargetScore={totalTargetScore} overallProgress={overallProgress}
+        heatmapStartFormatted={heatmapStartFormatted} heatmapMonths={heatmapMonths} dayLabels={dayLabels} heatmapGrid={heatmapGrid}
+        todayStr={todayStr} examDate={exam.examDate} tooltipData={null} tooltipVisible={false}
+        heatmapDays={heatmapDays} cardsByDate={cardsByDate}
         activeView={activeView} setActiveView={setActiveView}
         heatmapRef={useRef<HTMLDivElement | null>(null)}
         onCellMouseEnter={() => {}} onCellMouseLeave={() => {}} onCellClick={() => {}}
         setTooltipVisible={() => {}} setTooltipData={() => {}}
       />
 
-      <div className="main-content">
-        {/* Dashboard - Tasks Panel */}
+      <div className={styles.mainContent}>
+        {/* ─── Dashboard ─── */}
+        {activeView === "dashboard" && (
+          <div className="flex items-center gap-2 mb-4">
+            <button
+              className={`min-h-[34px] px-4 rounded-[8px] font-bold text-[13px] ${activeDashboardPanel === "tasks" ? "bg-[#18181B] text-white" : "bg-[#F4F4F5] text-[#18181B]"}`}
+              onClick={() => setActiveDashboardPanel("tasks")}
+            >
+              今日任务
+            </button>
+            <button
+              className={`min-h-[34px] px-4 rounded-[8px] font-bold text-[13px] ${activeDashboardPanel === "review" ? "bg-[#18181B] text-white" : "bg-[#F4F4F5] text-[#18181B]"}`}
+              onClick={() => setActiveDashboardPanel("review")}
+            >
+              今日复盘
+            </button>
+          </div>
+        )}
+
         {activeView === "dashboard" && activeDashboardPanel === "tasks" && (
-          <section className="workflow workspace-pane active" id="tasks">
-            <div className="section-heading">
-              <div><div className="section-label">Tasks</div><h2>今日任务</h2></div>
+          <section className="hero-grid workspace-pane active dashboard-hero" id="agent">
+            {/* AI Summary Card — only independent parts (no chat, no runPrompt) */}
+            <div className="agent-panel">
+              <div className="section-label">AI Workspace</div>
+              <h1>AI 学习助手</h1>
+              <div className="quick-prompts">
+                {quickPrompts.map((prompt) => (
+                  <button key={prompt} onClick={() => {
+                    if (prompt === "今天学什么") generatePlan();
+                    else if (prompt === "我现在属于第几轮") {
+                      pushAssistant(`当前主要科目处于 ${subjects[0]?.round ?? "第一轮"}，${subjects[0]?.layer ?? "Layer 1"}。`);
+                    } else {
+                      pushAssistant(`已收到请求。${prompt} 功能需要在完整 Agent 页面中运行。`);
+                    }
+                  }}>{prompt}</button>
+                ))}
+              </div>
+              {agentSteps.length > 0 && (
+                <div className="agent-run">
+                  {agentSteps.map((step, index) => (
+                    <div key={step.id}>
+                      <span>{index + 1}</span>
+                      <strong>{step.title}</strong>
+                      <b>{step.status}</b>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="chat-window">
+                {chat.slice(-7).map((message, index) => (
+                  <div className={`bubble ${message.role}`} key={`${message.text}-${index}`}>{message.text}</div>
+                ))}
+              </div>
             </div>
-            <div className="task-list">
-              {tasks.map((task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  activeTimerTaskId={activeTimerTaskId}
-                  timerStartTime={timerStartTime}
-                  elapsedSeconds={elapsedSeconds}
-                  onToggleDone={toggleTaskDone}
-                  onStartTask={() => setActiveTimerTaskId(task.id)}
-                  onEndLearning={() => updateTask(task.id, { status: "已完成" })}
-                  onRecordResult={() => {}}
-                  onShowDetail={() => setActiveTaskId(task.id)}
-                  onMoveTask={() => {}}
-                  onUpdateTask={updateTask}
-                  onStopTimer={() => setActiveTimerTaskId("")}
-                />
-              ))}
+
+            {/* Engine Panel — Tasks */}
+            <div className="engine-panel" id="today">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="section-label">今日学习</div>
+                  <h2 className="mb-0">任务与完成记录</h2>
+                </div>
+                <button className="secondary-button shrink-0" onClick={() => generatePlan()}>重新生成今日计划</button>
+              </div>
+              {/* AI 总览 */}
+              <div className="mt-4 p-4 rounded-[8px] bg-[#F4F4F5]">
+                <div className="flex items-center justify-between gap-4 mb-2">
+                  <strong className="text-[14px]">今日建议</strong>
+                  <span className="text-[12px] text-[#71717A]">AI 生成 · 基于遗忘曲线和考试时间</span>
+                </div>
+                <div className="flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-[#71717A] mb-2">
+                  <span>预计：<strong className="text-[#18181B]">{tasks.reduce((s, t) => s + t.minutes, 0)} 分钟</strong></span>
+                  <span>完成：<strong className="text-[#18181B]">{tasks.length} 个任务</strong></span>
+                  <span>掌握度提升：<strong className="text-[#18181B]">+{Math.round(tasks.reduce((s, t) => s + (t.masteryAfter - t.masteryBefore), 0) / Math.max(tasks.length, 1))}%</strong></span>
+                </div>
+                {tasks.some((t) => t.aiRecommended) && <p className="text-[12px] text-[#71717A]">AI 判断：今天不建议进入新章节。优先稳定熵变计算。</p>}
+              </div>
+              <div className="mt-4 task-stack">
+                {tasks.map((task) => (
+                  <article className={`task-row ${task.done ? "done" : ""}`} key={task.id}>
+                    <label className="task-check">
+                      <input type="checkbox" checked={task.done} onChange={() => toggleTaskDone(task)} />
+                    </label>
+                    <div className="task-content">
+                      <div className="task-title-row">
+                        <strong>{task.title}</strong>
+                        {task.aiRecommended && <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#EDEDED] text-[#52525B] font-bold">AI推荐</span>}
+                        <span className="task-duration">{task.estimatedCompletionMinutes || task.minutes} 分钟</span>
+                      </div>
+                      <span className="text-[12px]">{task.subject} / {task.core} / {task.branch} / {task.round} / {task.layer}</span>
+                      {/* 掌握度变化 */}
+                      <div className="flex items-center gap-2 text-[12px] text-[#71717A] mt-0.5">
+                        <span>掌握度</span>
+                        <div className="flex items-center gap-1">
+                          <span className="font-bold text-[#18181B]">{task.masteryBefore}%</span>
+                          <span className="text-[#A1A1AA]">→</span>
+                          <span className="font-bold text-[#18181B]">{task.masteryAfter}%</span>
+                        </div>
+                      </div>
+                      {/* AI 推荐原因 */}
+                      {task.aiRecommended && (
+                        <div className="mt-1.5 p-2 rounded-[6px] bg-[#F4F4F5]">
+                          <div className="text-[11px] font-bold text-[#52525B] mb-1">AI 推荐原因</div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-[#71717A]">
+                            {task.aiReasonForgetRate && <span>• {task.aiReasonForgetRate}</span>}
+                            {task.aiReasonLayerStable && <span>• {task.aiReasonLayerStable}</span>}
+                            {task.aiReasonMistakeCount && <span>• {task.aiReasonMistakeCount}</span>}
+                            {task.aiReasonExamFrequency && <span>• {task.aiReasonExamFrequency}</span>}
+                          </div>
+                        </div>
+                      )}
+                      <p className="text-[12px] mt-1">{task.standard}</p>
+                      {/* 学习中实时信息 */}
+                      {activeTimerTaskId === task.id && (
+                        <div className="mt-2 p-2 rounded-[6px] bg-[#F4F4F5]">
+                          <div className="flex items-center justify-between gap-2 text-[12px] mb-1">
+                            <span className={`font-bold ${task.status === "暂停" ? "text-[#F59E0B]" : "text-[#52525B]"}`}>
+                              {task.status === "暂停" ? "● 已暂停" : "● 学习中"}
+                            </span>
+                            <span className="text-[#71717A]">开始 {timerStartTime}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[12px]">
+                            <span className="text-[#71717A]">已学习</span>
+                            <span className="font-bold text-[#18181B]">{Math.floor(elapsedSeconds / 60)} 分钟 {elapsedSeconds % 60} 秒</span>
+                            <span className="text-[#A1A1AA]">| 预计 {task.estimatedCompletionMinutes || task.minutes} 分钟</span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-[#D4D4D8] overflow-hidden mt-1.5">
+                            <div className="h-full rounded-full bg-[#0F766E] transition-all duration-500"
+                              style={{ width: `${Math.min(100, (elapsedSeconds / 60) / (task.estimatedCompletionMinutes || task.minutes) * 100)}%` }} />
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] text-[#71717A] mt-0.5">
+                            <span>{Math.floor(elapsedSeconds / 60)} / {task.estimatedCompletionMinutes || task.minutes} min</span>
+                            <span>剩余 {Math.max(0, (task.estimatedCompletionMinutes || task.minutes) - Math.floor(elapsedSeconds / 60))} 分钟</span>
+                          </div>
+                        </div>
+                      )}
+                      {/* 操作区 */}
+                      <div className="task-actions">
+                        {activeTimerTaskId === task.id ? (
+                          <>
+                            {task.status === "暂停" ? (
+                              <>
+                                <button className="min-h-[30px] px-4 rounded-[6px] bg-[#F59E0B] text-white font-bold text-[12px]" type="button"
+                                  onClick={() => { updateTask(task.id, { status: "学习中" }); stopTimer(); }}>
+                                  继续学习
+                                </button>
+                                <button className="min-h-[30px] px-3 rounded-[6px] bg-[#18181B] text-white font-bold text-[12px]" type="button"
+                                  onClick={() => handleEndLearning(task)}>结束学习</button>
+                              </>
+                            ) : (
+                              <>
+                                <button className="min-h-[30px] px-4 rounded-[6px] bg-[#0F766E] text-white font-bold text-[12px]" type="button">⏱ 学习中</button>
+                                <button className="min-h-[30px] px-3 rounded-[6px] bg-[#F4F4F5] text-[#18181B] font-bold text-[12px]" type="button"
+                                  onClick={() => { stopTimer(); updateTask(task.id, { status: "暂停" }); }}>暂停</button>
+                                <button className="min-h-[30px] px-3 rounded-[6px] bg-[#18181B] text-white font-bold text-[12px]" type="button"
+                                  onClick={() => handleEndLearning(task)}>结束学习</button>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <button className="min-h-[30px] px-4 rounded-[6px] bg-[#18181B] text-white font-bold text-[12px]" type="button"
+                              onClick={() => startTask(task)}>开始学习</button>
+                            <button className="min-h-[30px] px-3 rounded-[6px] bg-[#F4F4F5] text-[#71717A] text-[12px]" type="button"
+                              onClick={() => { setActiveTaskId(task.id); setActiveDialog("task"); }}>记录结果</button>
+                          </>
+                        )}
+                        <details className="more-menu">
+                          <summary className="text-[12px] min-h-[28px] px-2 rounded-[6px] bg-[#F4F4F5] text-[#71717A] font-bold">•••</summary>
+                          <div className="more-items">
+                            <button className="text-button text-[12px]" type="button" onClick={() => moveTask(task.id, -1)}>提高优先级</button>
+                            <button className="text-button text-[12px]" type="button" onClick={() => moveTask(task.id, 1)}>降低优先级</button>
+                            <button className="text-button text-[12px]" type="button"
+                              onClick={() => { updateTask(task.id, { status: "延期" }); setNotice(`已延期：${task.title}`); }}>延期到明天</button>
+                            <button className="text-button text-[12px]" type="button"
+                              onClick={() => { updateTask(task.id, { status: "暂停" }); setNotice(`已暂停：${task.title}`); }}>暂停任务</button>
+                          </div>
+                        </details>
+                      </div>
+                      {/* 详情折叠 */}
+                      <details className="inline-details">
+                        <summary className="text-[12px] text-[#71717A] font-bold">▼ 查看详情</summary>
+                        <div className="flex flex-wrap gap-2 mt-2 p-2 rounded bg-[#F4F4F5]">
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-white whitespace-nowrap">教材：{task.source}</span>
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-white whitespace-nowrap">范围：{task.range}</span>
+                          {task.reason && <span className="text-[11px] text-[#71717A] w-full mt-1">原因：{task.reason}</span>}
+                        </div>
+                      </details>
+                    </div>
+                  </article>
+                ))}
+              </div>
             </div>
           </section>
         )}

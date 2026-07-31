@@ -21,6 +21,21 @@ Read `/Users/jiqiguanjia/Development/KaoyanPlatform/docs/AI_DEVELOPMENT_RULES.md
 11. **Commit each stable phase separately** with descriptive messages.
 12. **Stop after the requested phase and wait for user approval.** Do not auto-continue into the next phase.
 
+## 持久化数据契约兼容性（历史数据保护）
+
+**修改持久化数据类型或 lookup map 前，必须审计：**
+
+1. 旧版本曾写入过哪些值（查 git 历史/旧代码中的默认值、form 默认值、seed 数据）。
+2. localStorage / 已保存数据中是否可能存在这些历史值。
+3. lookup map（如 `ANNOTATION_COLORS`、`Record` 映射）是否覆盖所有历史合法值。
+4. 若需要"清理/收窄"联合类型，先确认没有历史数据会触发 `undefined`，否则需数据迁移或保留旧值。
+
+**禁止**用 `?? default` / `color?.border` 掩盖历史数据契约断裂；应修复类型域与 lookup，使其覆盖历史合法值。
+
+**回归测试要求**：为历史标签添加断言（如 `ANNOTATION_COLORS["核心概念"]` 存在且字段完整），防止未来"类型清理"误删历史兼容项。
+
+---
+
 ## Verified stable baselines (git commits)
 
 - `3c91c6c` — Snapshot before fixing component extraction regression

@@ -126,6 +126,21 @@ test("knowledge/agent/cards/settings page code exists in page.tsx", async () => 
   assert.match(page, /resourceView/);
 });
 
+test("historical annotation tag 核心概念 remains supported", async () => {
+  const [types, reader] = await Promise.all([
+    readFile(new URL("../app/lib/types.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ReaderPanel.tsx", import.meta.url), "utf8"),
+  ]);
+
+  // AnnotationTag union includes legacy value
+  assert.match(types, /AnnotationTag[\s\S]*核心概念/);
+  // ANNOTATION_COLORS has a full mapping (dot/bg/border/label) for it
+  assert.match(types, /"核心概念"\s*:\s*\{\s*dot: [^}]*bg: [^}]*border: [^}]*label: /);
+  // ReaderPanel initializes the group bucket and renders it
+  assert.match(reader, /"核心概念": \[\]/);
+  assert.match(reader, /\["重点", "易错", "疑问", "总结", "核心概念"\]/);
+});
+
 test("markdown requirements document is generated", async () => {
   const markdown = await readFile(new URL("../../筑巢考研工作台 MVP 产品需求文档.md", import.meta.url), "utf8");
   assert.match(markdown, /# .*考研工作台|筑巢考研工作台/);

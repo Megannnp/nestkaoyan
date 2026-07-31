@@ -2,6 +2,10 @@
 
 Before modifying any code, read `/Users/jiqiguanjia/Development/KaoyanPlatform/docs/AI_DEVELOPMENT_RULES.md`.
 
+**历史数据契约兼容性**
+
+修改持久化数据类型或 lookup map（如 `ANNOTATION_COLORS`）前，必须审计旧版本曾写入过的历史值（git 历史/旧 form 默认值/seed），并确认 lookup 覆盖所有历史合法值。禁止用 `?? default` / `color?.border` 掩盖数据契约断裂——应修复类型域或 lookup，并补回归测试。
+
 For refactor tasks:
 - Preserve all existing behavior.
 - Perform a dependency audit before editing.

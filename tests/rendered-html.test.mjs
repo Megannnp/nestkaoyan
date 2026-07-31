@@ -54,6 +54,68 @@ test("server-renders the kaoyan learning agent workspace", async () => {
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton|codex-preview/);
 });
 
+test("dashboard SSR renders sidebar nav and task content", async () => {
+  const response = await render();
+  const html = await response.text();
+
+  // Sidebar nav (always rendered in SSR)
+  assert.match(html, /今日工作台/);
+  assert.match(html, /AI学习助手/);
+  assert.match(html, /知识中心/);
+  assert.match(html, /成长卡片/);
+  assert.match(html, /设置/);
+  assert.match(html, /学习记录/); // heatmap section
+  assert.match(html, /开始于 /);  // heatmap start date
+
+  // Dashboard task panel (default view)
+  assert.match(html, /今日任务/);
+  assert.match(html, /回看：熵变计算适用条件/);
+  assert.match(html, /AI推荐/);
+});
+
+test("knowledge/agent/cards/settings page code exists in page.tsx", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  // Knowledge Center pages
+  assert.match(page, /activeView === "knowledge"/);
+  assert.match(page, /学习资料/);
+  assert.match(page, /真题数据库/);
+  assert.match(page, /知识图谱/);
+  assert.match(page, /学习资源库/);
+  assert.match(page, /上传资源/);
+  assert.match(page, /📖 阅读/);
+  assert.match(page, /activeKnowledgePanel === "resources"/);
+  assert.match(page, /activeKnowledgePanel === "questions"/);
+  assert.match(page, /activeKnowledgePanel === "graph"/);
+  assert.match(page, /openResource/);
+  assert.match(page, /inferResource/);
+  assert.match(page, /addResource/);
+  assert.match(page, /addQuestion/);
+  assert.match(page, /addNode/);
+
+  // Agent page
+  assert.match(page, /activeView === "agent"/);
+  assert.match(page, /runAgentWorkflow/);
+  assert.match(page, /runPrompt/);
+  assert.match(page, /prompt-bar/);
+
+  // Cards
+  assert.match(page, /activeView === "cards"/);
+
+  // Settings
+  assert.match(page, /activeView === "settings"/);
+  assert.match(page, /<SettingsPanel/);
+
+  // Dashboard heatmap + completion modal + timer
+  assert.match(page, /heatmapGrid/);
+  assert.match(page, /completionModalCustomMinutes/);
+  assert.match(page, /startTask/);
+  assert.match(page, /handleEndLearning/);
+  assert.match(page, /completeTask/);
+  assert.match(page, /questionFilter/);
+  assert.match(page, /resourceView/);
+});
+
 test("markdown requirements document is generated", async () => {
   const markdown = await readFile(new URL("../../筑巢考研工作台 MVP 产品需求文档.md", import.meta.url), "utf8");
   assert.match(markdown, /# .*考研工作台|筑巢考研工作台/);

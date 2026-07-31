@@ -1,0 +1,15 @@
+# Cline Project Rules — 筑巢考研工作台
+
+Before modifying any code, read `/Users/jiqiguanjia/Development/KaoyanPlatform/docs/AI_DEVELOPMENT_RULES.md`.
+
+For refactor tasks:
+- Preserve all existing behavior.
+- Perform a dependency audit before editing.
+- Do not remove JSX, state, handlers, effects, or routes unless explicitly authorized.
+- Do not use placeholders or no-op handlers.
+- Do not default-value (`|| 0`, `?? []`, `= () => {}`) to hide missing dependencies.
+- One page or one component per task.
+- After changes, compare old vs new functionality table.
+- Build/Test passing is NOT completion — verify browser interaction loop.
+- Commit each stable phase separately (git commit).
+- Stop after the requested phase and wait for approval.

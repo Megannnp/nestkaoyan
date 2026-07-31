@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, type FormEvent } from "react";
 import type {
-  MasteryText, StudyMood, WorkspaceView, KnowledgePanel,
+  Risk, MasteryText, StudyMood, WorkspaceView, KnowledgePanel,
   DashboardPanel, ReviewScope, ActiveDialog, DeletedBackup,
   ExamGoal, Subject, Resource, Question, KnowledgeNode, Task,
   PendingItem, Review, Note, PlanLog, AppSettings, StudyDay,
@@ -90,6 +90,15 @@ export default function Home() {
   const [readerPage, setReaderPage] = useState(seedResources[0]?.currentPage ?? "");
   const [readerZoom, setReaderZoom] = useState("100%");
   const [favoritePages, setFavoritePages] = useState<string[]>([]);
+  const [resourceView, setResourceView] = useState<"grid" | "list">("grid");
+  const [fileUploadState, setFileUploadState] = useState<{
+    name: string;
+    size: number;
+    inferred: ReturnType<typeof inferResource>;
+    step: string;
+  } | null>(null);
+  const [questionFilter, setQuestionFilter] = useState({ subject: "全部", core: "全部", result: "全部", keyword: "" });
+  const [readingMode, setReadingMode] = useState(false);
   const [studyDays, setStudyDays] = useState<StudyDay[]>(seedStudyDays);
   const [decks, setDecks] = useState<CardDeck[]>(seedDecks);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
@@ -121,7 +130,19 @@ export default function Home() {
   const reviewMasteryDelta = nodes.reduce((sum, n) => sum + n.masteryScore, 0) / Math.max(nodes.length, 1);
   const reviewAiSummary = `今日完成 ${reviewCompletedTasks} 个任务，掌握度变化 ${Math.round(reviewMasteryDelta)}%。`;
   const activeCard = cards[cardIndex] || cards[0];
-  const activeResource = resources.find((r) => r.id === activeResourceId) || resources[0];
+  const subjectResources = resources.filter((resource) => resource.subject === activeKnowledgeSubject);
+  const activeResource = subjectResources.find((resource) => resource.id === activeResourceId) ?? subjectResources[0] ?? resources[0];
+  const subjectQuestions = questions.filter((question) => question.subject === activeKnowledgeSubject);
+  const subjectNodes = nodes.filter((node) => node.subject === activeKnowledgeSubject);
+  const subjectAnnotations = annotations.filter((annotation) => subjectResources.some((resource) => resource.id === annotation.resourceId));
+  const relatedQuestions = questions.filter((question) => activeResource && question.subject === activeResource.subject && (activeResource.linkedNode.includes(question.core) || activeResource.linkedNode.includes(question.branch)));
+  const filteredQuestions = questions.filter((question) => {
+    const bySubject = questionFilter.subject === "全部" || question.subject === questionFilter.subject;
+    const byCore = questionFilter.core === "全部" || question.core === questionFilter.core;
+    const byResult = questionFilter.result === "全部" || question.result === questionFilter.result;
+    const byKeyword = !questionFilter.keyword || `${question.stem}${question.knowledge}${question.year}`.includes(questionFilter.keyword);
+    return bySubject && byCore && byResult && byKeyword;
+  });
   const activeTask = tasks.find((task) => task.id === activeTaskId);
   const currentSubject = subjects.find((subject) => subject.name === activeKnowledgeSubject) ?? subjects[0];
 
@@ -273,6 +294,151 @@ export default function Home() {
         (resources.filter((r) => r.status === "已索引").length / Math.max(resources.length, 1)) * 100 * 0.2
       )
     : 0;
+
+  // ─── Knowledge Center handlers ───
+  function inferResource(rawName: string, subjectHint: string) {
+    const text = rawName.toLowerCase();
+    const matchedSubject = subjects.find((subject) => rawName.includes(subject.name) || rawName.includes(subject.name.replace(/\s/g, "")));
+    const subject = subjectHint || matchedSubject?.name || (rawName.includes("数学") ? "数学二" : rawName.includes("英语") ? "英语一" : rawName.includes("828") || rawName.includes("物理化学") || rawName.includes("傅献彩") ? "828 物理化学" : activeKnowledgeSubject || subjects[0]?.name || "未分科");
+    const isPastPaper = rawName.includes("真题") || /20\d{2}/.test(rawName);
+    const hasSolution = rawName.includes("解析") || rawName.includes("答案") || text.includes("solution");
+    const isFu = rawName.includes("傅献彩") || text.includes("physical");
+    const type = isPastPaper ? hasSolution ? "真题解析" : "真题" : isFu ? "教材" : rawName.includes("讲义") ? "课程讲义" : "学习资料";
+    const name = isFu ? "傅献彩《物理化学》" : rawName.replace(/\.(pdf|docx?|png|jpe?g)$/i, "");
+    const pages = isPastPaper ? "AI识别：按年份和题号拆分" : isFu ? "AI识别：共16章" : "AI识别：待确认章节";
+    const linkedNode = subject.includes("828") ? "热力学 / 相平衡 / 化学动力学 / 电化学 / 统计热力学 / 表面与胶体 / 实验与综合" : "待AI关联知识图谱";
+    const recommendedLayer = isPastPaper ? "Layer 2-4" : "Layer 1-2";
+    return { subject, type, name, pages, linkedNode, recommendedLayer, duplicate: resources.some((resource) => resource.fileName === rawName || resource.name === name) };
+  }
+
+  function openResource(resource: Resource) {
+    setActiveResourceId(resource.id);
+    setActiveKnowledgeSubject(resource.subject);
+    setReaderPage(resource.currentPage || "1");
+    setActiveKnowledgePanel("resources");
+    setActiveView("knowledge");
+    setNotice(`已打开资料：${resource.name}`);
+  }
+
+  function addResource(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const file = form.get("file") as File | null;
+    const rawName = String(file?.name || form.get("sourceText") || "").trim();
+    if (!rawName) return;
+    const inferred = inferResource(rawName, String(form.get("subjectHint") ?? ""));
+    const resource: Resource = {
+      id: makeId("r"),
+      name: inferred.name,
+      subject: inferred.subject,
+      type: inferred.type,
+      author: inferred.name.includes("傅献彩") ? "傅献彩" : "AI待确认",
+      version: inferred.name.includes("傅献彩") ? "AI识别：第六版" : "AI待确认",
+      pages: inferred.pages,
+      status: "AI待确认",
+      fileName: file?.name ?? rawName,
+      recommendedRound: "第一轮",
+      recommendedLayer: inferred.recommendedLayer,
+      currentPage: "",
+      lastRead: "",
+      readingMinutes: "",
+      linkedNode: inferred.linkedNode,
+    };
+    setResources((items) => [resource, ...items]);
+    setPending((items) => [
+      { id: makeId("p"), kind: inferred.type.includes("真题") ? "真题识别" : "资料切分", title: resource.name, subject: inferred.subject, detail: `AI识别结果：科目 ${inferred.subject}；类型 ${inferred.type}；${inferred.pages}；${inferred.linkedNode}；${inferred.duplicate ? "疑似重复上传" : "未发现重复"}`, status: "待确认", targetId: resource.id },
+      ...items,
+    ]);
+    setActiveKnowledgeSubject(inferred.subject);
+    pushAssistant(`AI已识别资料：${resource.name}。请确认后写入知识中心。`);
+    setActiveDialog(null);
+    event.currentTarget.reset();
+  }
+
+  function deleteResource(item: Resource) {
+    setLastDeleted({ collection: "resources", item, label: item.name });
+    setResources((items) => items.filter((resource) => resource.id !== item.id));
+    setNotice(`已删除资源：${item.name}`);
+  }
+
+  function addQuestion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const stem = String(form.get("stem") ?? "").trim();
+    if (!stem) return;
+    const question: Question = {
+      id: makeId("q"),
+      subject: String(form.get("subject") ?? subjects[0]?.name ?? ""),
+      school: String(form.get("school") ?? exam.school),
+      year: String(form.get("year") ?? ""),
+      number: String(form.get("number") ?? ""),
+      type: String(form.get("type") ?? "未知题型"),
+      score: String(form.get("score") ?? ""),
+      stem,
+      answer: String(form.get("answer") ?? ""),
+      originalAnalysis: String(form.get("originalAnalysis") ?? ""),
+      aiAnalysis: "待 AI 补充解析",
+      difficulty: String(form.get("difficulty") ?? "3"),
+      core: String(form.get("core") ?? coreNames[0]),
+      branch: String(form.get("branch") ?? ""),
+      knowledge: String(form.get("knowledge") ?? ""),
+      layer: String(form.get("layer") ?? "Layer 2"),
+      done: false,
+      result: "未做",
+      errorReason: "",
+      note: "",
+      source: "手动录入",
+      confirmed: false,
+      favorite: false,
+    };
+    setQuestions((items) => [question, ...items]);
+    setPending((items) => [{ id: makeId("p"), kind: "真题识别", title: `${question.year} ${question.subject} 第 ${question.number} 题`, subject: question.subject, detail: `建议关联到 ${question.core} / ${question.branch} / ${question.knowledge}`, status: "待确认", targetId: question.id }, ...items]);
+    pushAssistant("题目已录入，进入待确认队列。");
+    setActiveDialog(null);
+    event.currentTarget.reset();
+  }
+
+  function deleteQuestion(item: Question) {
+    setLastDeleted({ collection: "questions", item, label: `${item.year} 第 ${item.number} 题` });
+    setQuestions((items) => items.filter((question) => question.id !== item.id));
+    setNotice(`已删除真题：${item.year} 第 ${item.number} 题`);
+  }
+
+  function addNode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const knowledge = String(form.get("knowledge") ?? "").trim();
+    if (!knowledge) return;
+    const node: KnowledgeNode = {
+      id: makeId("k"),
+      subject: String(form.get("subject") ?? subjects[0]?.name ?? ""),
+      core: String(form.get("core") ?? coreNames[0]),
+      branch: String(form.get("branch") ?? ""),
+      knowledge,
+      explanation: String(form.get("explanation") ?? ""),
+      prerequisite: String(form.get("prerequisite") ?? ""),
+      related: String(form.get("related") ?? ""),
+      masteryLevel: Number(form.get("masteryLevel") ?? 0),
+      masteryScore: Number(form.get("masteryScore") ?? 0),
+      confidence: "低",
+      round: "第一轮",
+      layer: "Layer 1",
+      mistakes: 0,
+      reviewRisk: "正常",
+      isMonthlyFocus: false,
+    };
+    setNodes((items) => [node, ...items]);
+    setActiveKnowledgeSubject(node.subject);
+    pushAssistant(`已添加知识点：${node.knowledge}（${node.core} / ${node.branch}）`);
+    setActiveDialog(null);
+    event.currentTarget.reset();
+  }
+
+  function deleteNode(item: KnowledgeNode) {
+    setLastDeleted({ collection: "nodes", item, label: item.knowledge });
+    setNodes((items) => items.filter((node) => node.id !== item.id));
+    setNotice(`已删除知识点：${item.knowledge}`);
+  }
 
   // ─── Dashboard handlers ───
   function updateTask(id: string, patch: Partial<Task>) {
@@ -726,22 +892,356 @@ export default function Home() {
           />
         )}
 
-        {/* Knowledge - Reader Panel */}
-        {activeView === "knowledge" && activeKnowledgePanel === "resources" && activeResource && (
-          <ReaderPanel
-            activeResource={activeResource}
-            readerSearch={readerSearch} readerPage={readerPage} readerZoom={readerZoom}
-            favoritePages={favoritePages} activePageKey={`${activeResource.id}-${readerPage}`}
-            relatedQuestions={questions.filter((q) => q.subject === activeResource.subject)}
-            subjectAnnotations={annotations.filter((a) => a.resourceId === activeResource.id)}
-            subjectNodes={nodes.filter((n) => n.subject === activeResource.subject)}
-            onSetReaderSearch={setReaderSearch} onSetReaderPage={setReaderPage}
-            onSetReaderZoom={setReaderZoom} onSaveProgress={() => {}}
-            onMarkRead={() => {}} onToggleFavorite={() => {}}
-            onShowRelated={() => {}} onCreateCard={() => {}}
-            onDeleteAnnotation={() => {}} onEditAnnotation={() => {}}
-            onJumpToPage={setReaderPage}
-          />
+        {/* ─── Knowledge Center ─── */}
+        {activeView === "knowledge" && (
+          <section className={`knowledge workspace-pane ${activeView === "knowledge" ? "active" : ""}`} id="knowledge-center">
+            {/* 知识中心首页：科目 Tab + 三个入口 */}
+            {activeKnowledgePanel === "landing" && (
+              <div>
+                <div className="section-heading">
+                  <div><div className="section-label">Knowledge Center</div><h2>知识中心</h2></div>
+                </div>
+                {/* 科目 Tab */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {subjects.map((subject) => (
+                    <button
+                      key={subject.id}
+                      className={`min-h-[30px] px-3 rounded-[8px] font-bold text-[12px] ${
+                        activeKnowledgeSubject === subject.name
+                          ? "bg-[#18181B] text-white"
+                          : "bg-[#F4F4F5] text-[#18181B]"
+                      }`}
+                      onClick={() => setActiveKnowledgeSubject(subject.name)}
+                    >
+                      {subject.name}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <button className="p-6 rounded-[12px] border border-[#E4E4E7] bg-white text-left hover:shadow-md transition-shadow" onClick={() => { setActiveKnowledgePanel("resources"); }}>
+                    <div className="text-[24px] mb-2">📚</div>
+                    <strong className="text-[16px] block mb-1">学习资料</strong>
+                    <span className="text-[13px] text-[#71717A]">{subjectResources.length} 个资料</span>
+                  </button>
+                  <button className="p-6 rounded-[12px] border border-[#E4E4E7] bg-white text-left hover:shadow-md transition-shadow" onClick={() => { setActiveKnowledgePanel("questions"); }}>
+                    <div className="text-[24px] mb-2">📝</div>
+                    <strong className="text-[16px] block mb-1">真题数据库</strong>
+                    <span className="text-[13px] text-[#71717A]">{subjectQuestions.length} 道真题</span>
+                  </button>
+                  <button className="p-6 rounded-[12px] border border-[#E4E4E7] bg-white text-left hover:shadow-md transition-shadow" onClick={() => { setActiveKnowledgePanel("graph"); }}>
+                    <div className="text-[24px] mb-2">🧠</div>
+                    <strong className="text-[16px] block mb-1">知识图谱</strong>
+                    <span className="text-[13px] text-[#71717A]">{subjectNodes.length} 个知识点</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 非 landing：面包屑返回 */}
+            {activeKnowledgePanel !== "landing" && (
+              <div>
+                <div className="flex items-center gap-3 mb-4">
+                  <button className="text-[12px] text-[#71717A] hover:text-[#18181B]" onClick={() => setActiveKnowledgePanel("landing")}>← 返回资源总览</button>
+                  <div className="flex-1" />
+                </div>
+
+                {/* Resources */}
+                {activeKnowledgePanel === "resources" && (
+                  <div>
+                    <div className="section-heading compact-heading">
+                      <div><div className="section-label">AI First</div><h2>学习资源库</h2><p className="section-hint">上传并识别，AI识别结果进入待确认队列。</p></div>
+                      <button className="secondary-button" onClick={() => setActiveDialog("resource")}>上传资源</button>
+                    </div>
+
+                    {/* 上传资源 Modal — 文件选择 + AI 识别状态机 */}
+                    {activeDialog === "resource" && (
+                      <div className="modal-backdrop" role="presentation" onClick={() => setActiveDialog(null)}>
+                        <section className="modal-panel" role="dialog" aria-modal="true" aria-label="AI识别资料" onClick={(event) => event.stopPropagation()}>
+                          <div className="modal-head"><div><span>AI First</span><strong>AI识别资料</strong></div><button onClick={() => setActiveDialog(null)}>关闭</button></div>
+                          <form onSubmit={addResource} className="modal-form">
+                            <label className="upload-drop" style={{ minHeight: '140px', transition: 'all 0.3s ease' }}>
+                              <span style={{ fontSize: '18px' }}>📁 拖拽文件到此处</span>
+                              <span style={{ fontSize: '13px', color: 'var(--muted)', marginTop: '4px' }}>或点击选择 支持 PDF / Word / 图片</span>
+                              <input name="file" type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const rawName = file.name;
+                                const inferred = inferResource(rawName, "");
+                                setFileUploadState({ name: file.name, size: file.size, inferred, step: "uploading" });
+                                setTimeout(() => { setFileUploadState((prev) => { if (!prev) return prev; return { ...prev, step: "extracting" }; }); }, 400);
+                                setTimeout(() => { setFileUploadState((prev) => { if (!prev) return prev; return { ...prev, step: "identifying" }; }); }, 900);
+                                setTimeout(() => { setFileUploadState((prev) => { if (!prev) return prev; return { ...prev, step: "parsing" }; }); }, 1500);
+                                setTimeout(() => { setFileUploadState((prev) => { if (!prev) return prev; return { ...prev, step: "mapping" }; }); }, 2100);
+                                setTimeout(() => { setFileUploadState((prev) => { if (!prev) return prev; return { ...prev, step: "done" }; }); }, 2600);
+                              }} />
+                            </label>
+                            {fileUploadState && (
+                              <div className="p-3 mt-3 rounded-[8px] border border-[#E4E4E7] bg-white flex items-center gap-3">
+                                <span style={{ fontSize: '22px' }}>📄</span>
+                                <div className="flex-1 min-w-0">
+                                  <strong className="text-[14px] block truncate">{fileUploadState.name}</strong>
+                                  <span className="text-[12px] text-[#71717A]">{(fileUploadState.size / (1024 * 1024)).toFixed(1)} MB · {fileUploadState.inferred.pages.includes("AI识别") ? "AI识别中" : fileUploadState.inferred.pages}</span>
+                                  {fileUploadState.step !== "done" && (
+                                    <div className="mt-1 flex items-center gap-1 text-[11px] text-[#71717A]">
+                                      {["uploading", "extracting", "identifying", "parsing", "mapping"].map((s) => {
+                                        const stages = ["uploading", "extracting", "identifying", "parsing", "mapping"];
+                                        const curIdx = stages.indexOf(fileUploadState.step);
+                                        const thisIdx = stages.indexOf(s);
+                                        return <span key={s} className={thisIdx < curIdx ? "text-[#0F766E]" : thisIdx === curIdx ? "text-[#18181B] font-bold" : "opacity-40"}>{thisIdx < curIdx ? "✓" : "·"}</span>;
+                                      })}
+                                      <span className="ml-1">
+                                        {fileUploadState.step === "uploading" ? "上传中" : fileUploadState.step === "extracting" ? "提取文本" : fileUploadState.step === "identifying" ? "识别科目/类型" : fileUploadState.step === "parsing" ? "解析章节" : fileUploadState.step === "mapping" ? "关联知识图谱" : ""}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {fileUploadState?.step === "done" && (
+                              <div className="p-3 mt-3 rounded-[8px] border border-[#E4E4E7] bg-white">
+                                <div className="text-[12px] font-bold text-[#18181B] mb-2">AI 识别结果</div>
+                                {[
+                                  { icon: '📘', label: '类型', value: fileUploadState.inferred.type },
+                                  { icon: '📖', label: '书名', value: fileUploadState.inferred.name },
+                                  { icon: '📚', label: '所属科目', value: fileUploadState.inferred.subject },
+                                  { icon: '🧠', label: '知识体系', value: fileUploadState.inferred.linkedNode },
+                                ].map((item) => (
+                                  <div key={item.label} className="flex items-center gap-2 text-[12px] mt-1">
+                                    <span>{item.icon}</span>
+                                    <span className="text-[#71717A] w-[64px] shrink-0">{item.label}</span>
+                                    <span className="text-[#18181B]">{item.value}</span>
+                                  </div>
+                                ))}
+                                <div className="flex gap-2 mt-3">
+                                  <button className="primary-btn" type="submit">确认保存</button>
+                                  <button className="secondary-btn" type="button" onClick={() => setActiveDialog(null)}>取消</button>
+                                </div>
+                              </div>
+                            )}
+                            {!fileUploadState && (
+                              <div className="flex gap-2 mt-3">
+                                <button className="primary-btn" type="submit">直接添加空白资料</button>
+                              </div>
+                            )}
+                          </form>
+                        </section>
+                      </div>
+                    )}
+
+                    {/* 资料库工具栏 */}
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="text-[13px] text-[#71717A]">{subjectResources.length} 个资料</span>
+                      <div className="view-toggle">
+                        <button className={resourceView === "grid" ? "active" : ""} onClick={() => setResourceView("grid")}>▦ 网格</button>
+                        <button className={resourceView === "list" ? "active" : ""} onClick={() => setResourceView("list")}>☰ 列表</button>
+                      </div>
+                    </div>
+
+                    {/* Bookshelf grid / list */}
+                    <div className={resourceView === "grid" ? "bookshelf-grid" : "resource-list"}>
+                      {subjectResources.length ? subjectResources.map((resource) => {
+                        const initials = resource.name.replace(/[《》]/g, "").replace(/第[一二三四五六七八九十\d]+版/g, "").slice(0, 2);
+                        const nodeCount = nodes.filter((n) => n.subject === resource.subject).length;
+                        const isTextbook = resource.type === "教材";
+                        const isPastPaper = resource.type.includes("真题");
+                        return (
+                          <article key={resource.id} className={resourceView === "grid" ? "book-card" : ""} onClick={() => resourceView === "grid" ? openResource(resource) : undefined}>
+                            {resourceView === "grid" ? (
+                              <>
+                                <div className={`book-spine ${isTextbook ? "empty-cover" : "has-cover"}`}>
+                                  {isTextbook ? (
+                                    <span className="initials">{initials}</span>
+                                  ) : isPastPaper ? (
+                                    <span>📝</span>
+                                  ) : (
+                                    <span>📄</span>
+                                  )}
+                                </div>
+                                <div className="book-body">
+                                  <div className="book-title">{resource.name}</div>
+                                  <div className="book-author">{resource.author} · {resource.version || "待确认"}</div>
+                                  <div className="book-tags">
+                                    <span className="tag-badge subtle">{resource.type}</span>
+                                    <span className={`tag-badge ${resource.status === "已索引" ? "green" : "subtle"}`}>{resource.status}</span>
+                                    <span className="tag-badge subtle">{resource.pages || "—"}</span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1 text-[11px] text-[#A1A1AA]">
+                                    <span>关联：{resource.linkedNode}</span>
+                                    <span>· {nodeCount} 知识点</span>
+                                  </div>
+                                  <div className="book-footer">
+                                    <button onClick={(e) => { e.stopPropagation(); openResource(resource); }}>📖 阅读</button>
+                                    <button className="text-button" onClick={(e) => { e.stopPropagation(); deleteResource(resource); }}>删除</button>
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <strong>{resource.name}</strong>
+                                <span>{resource.subject} / {resource.type} / {resource.status}</span>
+                                <p>{resource.fileName} / {resource.pages || "未填页码"} / 关联：{resource.linkedNode}</p>
+                                <button className="text-button" onClick={() => openResource(resource)}>打开阅读</button>
+                                <details className="inline-details">
+                                  <summary>编辑资源</summary>
+                                  <div className="mini-form">
+                                    <label><span>当前页码</span><input value={resource.currentPage} onChange={(event) => setResources((items) => items.map((item) => item.id === resource.id ? { ...item, currentPage: event.target.value, lastRead: "刚刚" } : item))} /></label>
+                                    <label><span>关联知识点</span><input value={resource.linkedNode} onChange={(event) => setResources((items) => items.map((item) => item.id === resource.id ? { ...item, linkedNode: event.target.value } : item))} /></label>
+                                    <label><span>资源状态</span><select value={resource.status} onChange={(event) => setResources((items) => items.map((item) => item.id === resource.id ? { ...item, status: event.target.value } : item))}><option>待解析</option><option>阅读中</option><option>已读</option><option>已复习</option><option>需要重学</option><option>已索引</option></select></label>
+                                    <button type="button" onClick={() => deleteResource(resource)}>删除资源</button>
+                                  </div>
+                                </details>
+                              </>
+                            )}
+                          </article>
+                        );
+                      }) : <p className="empty-state">暂无资料，点击「上传资源」导入教材或真题。</p>}
+                    </div>
+
+                    {/* Reader 阅读器 */}
+                    {activeResource && (
+                      <div className="mt-6 border-t border-[#E4E4E7] pt-4">
+                        <ReaderPanel
+                          activeResource={activeResource}
+                          readerSearch={readerSearch} readerPage={readerPage} readerZoom={readerZoom}
+                          favoritePages={favoritePages} activePageKey={`${activeResource.id}-${readerPage}`}
+                          relatedQuestions={relatedQuestions}
+                          subjectAnnotations={subjectAnnotations}
+                          subjectNodes={subjectNodes}
+                          onSetReaderSearch={setReaderSearch} onSetReaderPage={setReaderPage}
+                          onSetReaderZoom={setReaderZoom} onSaveProgress={() => {
+                            setResources((items) => items.map((item) => item.id === activeResource.id ? { ...item, readingMinutes: String(Math.max(Number(item.readingMinutes || 0), Math.round(elapsedSeconds / 60))) } : item));
+                          }}
+                          onMarkRead={() => {}} onToggleFavorite={() => {}}
+                          onShowRelated={() => {}} onCreateCard={() => {
+                            pushAssistant("这个请求需要调用成长卡片系统，卡片首页将在 Growth Cards 恢复后接通。");
+                          }}
+                          onDeleteAnnotation={() => {}} onEditAnnotation={() => {}}
+                          onJumpToPage={setReaderPage}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Questions */}
+                {activeKnowledgePanel === "questions" && (
+                  <div>
+                    <div className="section-heading">
+                      <div><div className="section-label">真题数据库</div><h2>{activeKnowledgeSubject} 真题录入、筛选、确认</h2></div>
+                      <button className="secondary-button" onClick={() => setActiveDialog("question")}>录入题目</button>
+                    </div>
+                    {activeDialog === "question" && (
+                      <div className="modal-backdrop" role="presentation" onClick={() => setActiveDialog(null)}>
+                        <section className="modal-panel" role="dialog" aria-modal="true" aria-label="手动录入题目" onClick={(event) => event.stopPropagation()}>
+                          <div className="modal-head"><div><span>真题数据库</span><strong>手动录入题目</strong></div><button onClick={() => setActiveDialog(null)}>关闭</button></div>
+                          <form className="form-grid question-form" onSubmit={addQuestion}>
+                            <label className="field"><span>所属科目</span><select name="subject">{subjects.map((subject) => <option key={subject.id}>{subject.name}</option>)}</select></label>
+                            <label className="field"><span>学校</span><input name="school" /></label>
+                            <label className="field"><span>年份</span><input name="year" /></label>
+                            <label className="field"><span>题号</span><input name="number" /></label>
+                            <label className="field"><span>题型</span><input name="type" /></label>
+                            <label className="field"><span>分值</span><input name="score" /></label>
+                            <label className="field"><span>七核</span><select name="core">{coreNames.map((core) => <option key={core}>{core}</option>)}</select></label>
+                            <label className="field"><span>分支</span><input name="branch" /></label>
+                            <label className="field"><span>知识点</span><input name="knowledge" /></label>
+                            <label className="field"><span>难度 1-5</span><input name="difficulty" /></label>
+                            <label className="field"><span>学习层级</span><select name="layer"><option>Layer 1</option><option>Layer 2</option><option>Layer 3</option><option>Layer 4</option></select></label>
+                            <label className="field wide-field"><span>题干</span><input name="stem" /></label>
+                            <label className="field wide-field"><span>标准答案</span><input name="answer" /></label>
+                            <label className="field wide-field"><span>原始解析</span><input name="originalAnalysis" /></label>
+                            <button>手动录入题目</button>
+                          </form>
+                        </section>
+                      </div>
+                    )}
+                    <div className="filter-bar">
+                      <select value={questionFilter.subject} onChange={(event) => setQuestionFilter({ ...questionFilter, subject: event.target.value })}><option>全部</option>{subjects.map((subject) => <option key={subject.id}>{subject.name}</option>)}</select>
+                      <select value={questionFilter.core} onChange={(event) => setQuestionFilter({ ...questionFilter, core: event.target.value })}><option>全部</option>{coreNames.map((core) => <option key={core}>{core}</option>)}</select>
+                      <select value={questionFilter.result} onChange={(event) => setQuestionFilter({ ...questionFilter, result: event.target.value })}><option>全部</option><option>未做</option><option>正确</option><option>错误</option></select>
+                      <input value={questionFilter.keyword} onChange={(event) => setQuestionFilter({ ...questionFilter, keyword: event.target.value })} placeholder="搜索年份/题干/知识点" />
+                    </div>
+                    <div className="question-list">
+                      {filteredQuestions.filter((question) => question.subject === activeKnowledgeSubject).map((question) => (
+                        <article key={question.id} className={!question.confirmed ? "unconfirmed" : ""}>
+                          <div><strong>{question.year} {question.subject} 第 {question.number} 题</strong><b>{question.confirmed ? "已确认" : "待确认"}</b></div>
+                          <p>{question.stem}</p>
+                          <span>{question.core} / {question.branch} / {question.knowledge} / {question.layer} / 难度 {question.difficulty}</span>
+                          <small>原解析：{question.originalAnalysis || "无"} / AI解析：{question.aiAnalysis}</small>
+                          <details className="inline-details">
+                            <summary>做题记录/编辑</summary>
+                            <div className="mini-form">
+                              <label><span>做题结果</span><select value={question.result} onChange={(event) => setQuestions((items) => items.map((item) => item.id === question.id ? { ...item, result: event.target.value as Question["result"], done: event.target.value !== "未做" } : item))}><option>未做</option><option>正确</option><option>错误</option></select></label>
+                              <label><span>错误原因</span><input value={question.errorReason} onChange={(event) => setQuestions((items) => items.map((item) => item.id === question.id ? { ...item, errorReason: event.target.value } : item))} /></label>
+                              <label><span>用户笔记</span><input value={question.note} onChange={(event) => setQuestions((items) => items.map((item) => item.id === question.id ? { ...item, note: event.target.value } : item))} /></label>
+                              <button type="button" onClick={() => setQuestions((items) => items.map((item) => item.id === question.id ? { ...item, favorite: !item.favorite } : item))}>{question.favorite ? "取消收藏" : "收藏"}</button>
+                              <button type="button" onClick={() => deleteQuestion(question)}>删除题目</button>
+                            </div>
+                          </details>
+                        </article>
+                      ))}
+                      {filteredQuestions.filter((question) => question.subject === activeKnowledgeSubject).length === 0 && <p className="empty-state">当前筛选下没有真题。</p>}
+                    </div>
+                  </div>
+                )}
+
+                {/* Graph */}
+                {activeKnowledgePanel === "graph" && (
+                  <div>
+                    <div className="section-heading">
+                      <div><div className="section-label">知识图谱</div><h2>{activeKnowledgeSubject} 七核、分支、知识点编辑</h2></div>
+                      <button className="secondary-button" onClick={() => setActiveDialog("node")}>添加知识点</button>
+                    </div>
+                    {activeDialog === "node" && (
+                      <div className="modal-backdrop" role="presentation" onClick={() => setActiveDialog(null)}>
+                        <section className="modal-panel" role="dialog" aria-modal="true" aria-label="添加知识点" onClick={(event) => event.stopPropagation()}>
+                          <div className="modal-head"><div><span>知识图谱</span><strong>添加知识点</strong></div><button onClick={() => setActiveDialog(null)}>关闭</button></div>
+                          <form className="form-grid" onSubmit={addNode}>
+                            <label className="field"><span>所属科目</span><select name="subject">{subjects.map((subject) => <option key={subject.id}>{subject.name}</option>)}</select></label>
+                            <label className="field"><span>七核</span><select name="core">{coreNames.map((core) => <option key={core}>{core}</option>)}</select></label>
+                            <label className="field"><span>分支</span><input name="branch" /></label>
+                            <label className="field wide-field"><span>知识点</span><input name="knowledge" /></label>
+                            <label className="field wide-field"><span>解释</span><input name="explanation" /></label>
+                            <label className="field"><span>前置</span><input name="prerequisite" /></label>
+                            <label className="field"><span>相关</span><input name="related" /></label>
+                            <label className="field"><span>掌握层级</span><select name="masteryLevel"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+                            <label className="field"><span>掌握分数</span><input name="masteryScore" /></label>
+                            <button>添加知识点</button>
+                          </form>
+                        </section>
+                      </div>
+                    )}
+                    <div className="knowledge-list">
+                      {subjectNodes.map((node) => (
+                        <article key={node.id} className="p-3 rounded-[8px] border border-[#E4E4E7] bg-white">
+                          <div className="flex items-center justify-between mb-1">
+                            <strong className="text-[14px]">{node.core} / {node.branch} / {node.knowledge}</strong>
+                            <span className={`tag-badge ${node.reviewRisk === "高风险" ? "danger" : node.reviewRisk === "需要关注" ? "warn" : "subtle"}`}>{node.reviewRisk}</span>
+                          </div>
+                          <p className="text-[12px] text-[#71717A] mb-2">{node.explanation}</p>
+                          <div className="flex items-center gap-4 text-[12px] text-[#71717A]">
+                            <span>掌握度 <strong className={`${node.masteryScore >= 70 ? "text-[#0F766E]" : node.masteryScore >= 40 ? "text-[#F59E0B]" : "text-[#EF4444]"}`}>{node.masteryScore}%</strong></span>
+                            <span>掌握层级 {node.masteryLevel}/4</span>
+                            <span>错题 {node.mistakes} 次</span>
+                            {node.isMonthlyFocus && <span className="tag-badge green">当月重点</span>}
+                          </div>
+                          <details className="inline-details">
+                            <summary className="text-[12px] text-[#71717A] font-bold">编辑</summary>
+                            <div className="mini-form mt-2">
+                              <label><span>知识点</span><input value={node.knowledge} onChange={(event) => setNodes((items) => items.map((item) => item.id === node.id ? { ...item, knowledge: event.target.value } : item))} /></label>
+                              <label><span>掌握分数</span><input value={node.masteryScore} onChange={(event) => setNodes((items) => items.map((item) => item.id === node.id ? { ...item, masteryScore: Number(event.target.value || 0) } : item))} /></label>
+                              <label><span>复习风险</span><select value={node.reviewRisk} onChange={(event) => setNodes((items) => items.map((item) => item.id === node.id ? { ...item, reviewRisk: event.target.value as Risk } : item))}><option>正常</option><option>需要关注</option><option>进度落后</option><option>高风险</option></select></label>
+                              <button type="button" onClick={() => deleteNode(node)}>删除节点</button>
+                            </div>
+                          </details>
+                        </article>
+                      ))}
+                      {subjectNodes.length === 0 && <p className="empty-state">暂无知识点，点击「添加知识点」开始构建图谱。</p>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
         )}
 
         {/* Cards - Card Viewer */}

@@ -101,6 +101,16 @@ test("knowledge/agent/cards/settings page code exists in page.tsx", async () => 
 
   // Cards
   assert.match(page, /activeView === "cards"/);
+  assert.match(page, /subjectCards/);
+  assert.match(page, /dueCards/);
+  assert.match(page, /cardQueue/);
+  assert.match(page, /quickCardFront/);
+  assert.match(page, /createCardFromText/);
+  assert.match(page, /reviewCard/);
+  assert.match(page, /moveCard/);
+  assert.match(page, /openCardSource/);
+  assert.match(page, /showRelatedQuestions/);
+  assert.match(page, /<CardViewer/);
 
   // Settings
   assert.match(page, /activeView === "settings"/);

@@ -107,6 +107,9 @@ export default function Home() {
   const [cardIndex, setCardIndex] = useState(0);
   const [cardFlipped, setCardFlipped] = useState(false);
   const [cardView, setCardView] = useState<"复习" | "管理">("复习");
+  const [quickCardFront, setQuickCardFront] = useState("");
+  const [quickCardBack, setQuickCardBack] = useState("");
+  const [quickCardType, setQuickCardType] = useState<GrowthCard["type"]>("公式卡");
   const [reviewTab, setReviewTab] = useState<"概览" | "填写复盘" | "AI总结">("概览");
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>([]);
   const [logs, setLogs] = useState<PlanLog[]>([
@@ -129,7 +132,10 @@ export default function Home() {
   const reviewReviewedCards = cards.filter((c) => c.lastReviewed !== "未复习").length;
   const reviewMasteryDelta = nodes.reduce((sum, n) => sum + n.masteryScore, 0) / Math.max(nodes.length, 1);
   const reviewAiSummary = `今日完成 ${reviewCompletedTasks} 个任务，掌握度变化 ${Math.round(reviewMasteryDelta)}%。`;
-  const activeCard = cards[cardIndex] || cards[0];
+  const subjectCards = cards.filter((card) => card.subject === activeCardSubject);
+  const dueCards = subjectCards.filter((card) => card.mastery === "不会" || card.mastery === "模糊" || card.lastReviewed === "未复习" || !card.nextReviewAt || card.nextReviewAt <= hydratedTodayStr);
+  const cardQueue = dueCards.length ? dueCards : subjectCards;
+  const activeCard = cardQueue[cardIndex] || cardQueue[0];
   const subjectResources = resources.filter((resource) => resource.subject === activeKnowledgeSubject);
   const activeResource = subjectResources.find((resource) => resource.id === activeResourceId) ?? subjectResources[0] ?? resources[0];
   const subjectQuestions = questions.filter((question) => question.subject === activeKnowledgeSubject);
@@ -440,6 +446,97 @@ export default function Home() {
     setNotice(`已删除知识点：${item.knowledge}`);
   }
 
+  // ─── Growth Cards handlers ───
+  function createCardFromText(createdBy: GrowthCard["createdBy"], text: string, annotation?: Annotation) {
+    const card: GrowthCard = {
+      id: makeId("c"),
+      title: annotation ? `${annotation.selection}：${annotation.tag}` : "AI 生成成长卡片",
+      front: annotation?.selection ?? "请回忆这条内容的核心结论。",
+      back: annotation ? `${annotation.selection}\n${annotation.note}` : text,
+      type: text.includes("填空") ? "填空卡" : text.includes("推导") ? "推导卡" : text.includes("条件") ? "条件辨析卡" : "公式卡",
+      subject: currentSubject?.name ?? "未分科",
+      core: nodes[0]?.core ?? "待关联",
+      branch: nodes[0]?.branch ?? "待关联",
+      knowledge: nodes[0]?.knowledge ?? "待关联",
+      source: annotation?.resourceName ?? activeResource?.name ?? "AI 对话",
+      page: annotation?.page ?? activeResource?.currentPage ?? "",
+      modes: ["背诵", text.includes("填空") ? "填空" : "条件辨析"],
+      createdBy,
+      createdAt: today(),
+      lastReviewed: "未复习",
+      nextReviewAt: dateOnly(),
+      mastery: "模糊",
+      note: annotation?.note ?? "",
+      favorite: false,
+    };
+    setCards((items) => [card, ...items]);
+    setActiveCardSubject(card.subject);
+    if (annotation) setAnnotations((items) => items.map((item) => item.id === annotation.id ? { ...item, handled: true } : item));
+    pushAssistant(`已创建成长卡片：${card.title}`);
+  }
+
+  function reviewCard(id: string, mastery: GrowthCard["mastery"]) {
+    const intervalDays = mastery === "不会" ? 1 : mastery === "模糊" ? 3 : mastery === "认识" ? 7 : mastery === "熟练" ? 14 : 30;
+    setCards((items) => items.map((card) => card.id === id ? { ...card, mastery, lastReviewed: today(), nextReviewAt: dateOnly(intervalDays) } : card));
+    const interval = mastery === "不会" ? "明天" : mastery === "模糊" ? "3 天后" : mastery === "认识" ? "7 天后" : mastery === "熟练" ? "14 天后" : "30 天后";
+    pushAssistant(`已记录卡片掌握状态：${mastery}。下次建议复习：${interval}。`);
+    setCardFlipped(false);
+    setCardIndex((index) => Math.min(index + 1, Math.max(cardQueue.length - 1, 0)));
+  }
+
+  function deleteCard(item: GrowthCard) {
+    setLastDeleted({ collection: "cards", item, label: item.title });
+    setCards((items) => items.filter((card) => card.id !== item.id));
+    setNotice(`已删除卡片：${item.title}`);
+  }
+
+  function openCardSource(card: GrowthCard) {
+    const relatedResource = resources.find((r) => r.name.includes(card.source) || card.source.includes(r.name));
+    if (relatedResource) {
+      setActiveResourceId(relatedResource.id);
+      setActiveKnowledgeSubject(relatedResource.subject);
+      setReaderPage(card.page || relatedResource.currentPage || "1");
+      setActiveKnowledgePanel("resources");
+      setActiveView("knowledge");
+      setNotice(`已打开来源：${card.source}`);
+    } else {
+      pushAssistant(`未找到卡片来源资源：${card.source}`);
+    }
+  }
+
+  function showRelatedQuestions(core: string, keyword = "", subject = activeCardSubject || currentSubject?.name || "全部") {
+    setQuestionFilter({ subject, core, result: "全部", keyword });
+    setActiveKnowledgeSubject(subject === "全部" ? subjects[0]?.name || "" : subject);
+    setActiveKnowledgePanel("questions");
+    setActiveView("knowledge");
+  }
+
+  function moveCard(step: number) {
+    setCardFlipped(false);
+    setCardIndex((index) => Math.min(Math.max(index + step, 0), Math.max(cardQueue.length - 1, 0)));
+  }
+
+  // 键盘快捷键 (仅当 viewing cards 复习时生效)
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (activeView !== "cards" || cardView !== "复习" || !activeCard) return;
+      if (e.key === " " || e.key === "Space") { e.preventDefault(); setCardFlipped((v) => !v); }
+      else if (e.key === "ArrowLeft") moveCard(-1);
+      else if (e.key === "ArrowRight") moveCard(1);
+      else if (e.key === "1") reviewCard(activeCard.id, "认识");
+      else if (e.key === "2") reviewCard(activeCard.id, "模糊");
+      else if (e.key === "3") reviewCard(activeCard.id, "不会");
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [activeView, cardView, activeCard, cardQueue, cardFlipped]);
+
+  // 索引校正：队列变化时避免越界
+  useEffect(() => {
+    if (cardQueue.length === 0) { setCardIndex(0); return; }
+    setCardIndex((idx) => Math.min(Math.max(idx, 0), Math.max(cardQueue.length - 1, 0)));
+  }, [cardQueue.length]);
+
   // ─── Dashboard handlers ───
   function updateTask(id: string, patch: Partial<Task>) {
     setTasks((items) => items.map((task) => task.id === id ? { ...task, ...patch } : task));
@@ -611,11 +708,15 @@ export default function Home() {
       return;
     }
     if (text.includes("复习")) {
-      pushAssistant("这个请求需要调用成长卡片复习队列，卡片首页将在 Growth Cards 恢复后接通。");
+      setActiveView("cards");
+      setCardView("复习");
+      pushAssistant(`已进入 ${activeCardSubject || currentSubject?.name || "当前科目"} 的成长卡片复习。`);
       return;
     }
     if (text.includes("卡片") || text.includes("填空卡") || text.includes("公式卡")) {
-      pushAssistant("这个请求需要调用成长卡片系统，卡片首页将在 Growth Cards 恢复后接通。");
+      createCardFromText("AI对话", text);
+      setActiveView("cards");
+      setCardView("复习");
       return;
     }
     if (text.includes("第几轮")) {
@@ -1112,9 +1213,8 @@ export default function Home() {
                             setResources((items) => items.map((item) => item.id === activeResource.id ? { ...item, readingMinutes: String(Math.max(Number(item.readingMinutes || 0), Math.round(elapsedSeconds / 60))) } : item));
                           }}
                           onMarkRead={() => {}} onToggleFavorite={() => {}}
-                          onShowRelated={() => {}} onCreateCard={() => {
-                            pushAssistant("这个请求需要调用成长卡片系统，卡片首页将在 Growth Cards 恢复后接通。");
-                          }}
+                          onShowRelated={showRelatedQuestions}
+                          onCreateCard={(text, annotation) => { createCardFromText("资料批注", text, annotation); setActiveView("cards"); setCardView("复习"); }}
                           onDeleteAnnotation={() => {}} onEditAnnotation={() => {}}
                           onJumpToPage={setReaderPage}
                         />
@@ -1244,27 +1344,209 @@ export default function Home() {
           </section>
         )}
 
-        {/* Cards - Card Viewer */}
-        {activeView === "cards" && activeCard && (
-          <CardViewer
-            activeCard={activeCard}
-            cardIndex={cardIndex} cardQueue={cards}
-            cardFlipped={cardFlipped} cardMode={cardMode}
-            onFlip={() => setCardFlipped(!cardFlipped)}
-            onMove={(step) => setCardIndex(Math.max(0, Math.min(cards.length - 1, cardIndex + step)))}
-            onReview={(id, mastery) => {
-              setCards((prev) => prev.map((c) => {
-                if (c.id !== id) return c;
-                const interval = CARD_REVIEW_INTERVALS[mastery] || 1;
-                const nextDate = new Date();
-                nextDate.setDate(nextDate.getDate() + interval);
-                return { ...c, mastery, lastReviewed: new Date().toISOString(), nextReviewAt: nextDate.toISOString().slice(0, 10) };
-              }));
-            }}
-            onFocusMode={() => setFocusMode(!focusMode)}
-            onOpenSource={() => {}}
-            onShowRelated={() => {}}
-          />
+        {/* ─── Growth Cards 首页 ─── */}
+        {activeView === "cards" && (
+          <section className={`knowledge workspace-pane ${activeView === "cards" ? "active" : ""}`} id="cards">
+            <div className="section-heading">
+              <div><div className="section-label">Growth Cards</div><h2>成长卡片</h2></div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button className={`min-h-[32px] px-3 rounded-[8px] font-bold text-[13px] ${cardView === "复习" ? "bg-[#18181B] text-white" : "bg-[#F4F4F5] text-[#18181B]"}`} onClick={() => setCardView("复习")}>复习</button>
+                <button className={`min-h-[32px] px-3 rounded-[8px] font-bold text-[13px] ${cardView === "管理" ? "bg-[#18181B] text-white" : "bg-[#F4F4F5] text-[#18181B]"}`} onClick={() => setCardView("管理")}>管理</button>
+                <button className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={() => setActiveDialog("card")}>新建卡片</button>
+              </div>
+            </div>
+
+            {/* 快捷创建卡片 */}
+            <div className="quick-card-form mb-4">
+              <div className="row">
+                <span className="text-[12px] font-bold text-[#71717A]">快速创建卡片</span>
+                <span className="text-[11px] text-[#A1A1AA]">自动关联当前科目和知识点</span>
+              </div>
+              <div className="row">
+                <input placeholder="正面内容（公式、概念、问题）" value={quickCardFront} onChange={(e) => setQuickCardFront(e.target.value)} />
+                <input placeholder="背面内容（答案、解释）" value={quickCardBack} onChange={(e) => setQuickCardBack(e.target.value)} />
+                <select value={quickCardType} onChange={(e) => setQuickCardType(e.target.value as GrowthCard["type"])}>
+                  <option>公式卡</option><option>概念卡</option><option>填空卡</option><option>推导卡</option><option>条件辨析卡</option><option>错题卡</option>
+                </select>
+                <button className="min-h-[38px] px-4 rounded-[8px] bg-[#18181B] text-white font-bold text-[13px] shrink-0"
+                  onClick={() => {
+                    if (!quickCardFront.trim()) return;
+                    const card: GrowthCard = {
+                      id: makeId("c"),
+                      title: quickCardFront.slice(0, 40),
+                      front: quickCardFront.trim(),
+                      back: quickCardBack.trim() || "待补充",
+                      type: quickCardType,
+                      subject: activeCardSubject || currentSubject?.name || "未分科",
+                      core: nodes.filter((n) => n.subject === activeCardSubject)[0]?.core || "待关联",
+                      branch: nodes.filter((n) => n.subject === activeCardSubject)[0]?.branch || "",
+                      knowledge: nodes.filter((n) => n.subject === activeCardSubject)[0]?.knowledge || "",
+                      source: activeResource?.name || "手动创建",
+                      page: activeResource?.currentPage || "",
+                      modes: ["背诵", quickCardType === "填空卡" ? "填空" : "条件辨析"],
+                      createdBy: "手动",
+                      createdAt: today(),
+                      lastReviewed: "未复习",
+                      nextReviewAt: dateOnly(),
+                      mastery: "模糊",
+                      note: "",
+                      favorite: false,
+                    };
+                    setCards((items) => [card, ...items]);
+                    setQuickCardFront("");
+                    setQuickCardBack("");
+                    pushAssistant(`已创建${quickCardType}：${card.title}`);
+                  }}
+                >创建卡片</button>
+              </div>
+            </div>
+
+            {/* 科目 Tab */}
+            <div className="subject-tabs">
+              {subjects.map((subject) => (
+                <button key={subject.id} className={activeCardSubject === subject.name ? "active" : ""} onClick={() => { setActiveCardSubject(subject.name); setCardIndex(0); setCardFlipped(false); }}>
+                  <strong>{subject.name}</strong>
+                  <span>{cards.filter((card) => card.subject === subject.name).length} 张卡片</span>
+                </button>
+              ))}
+            </div>
+
+            {/* 复习模式 */}
+            {cardView === "复习" && (
+              activeCard ? (
+                <CardViewer
+                  activeCard={activeCard}
+                  cardIndex={cardIndex} cardQueue={cardQueue}
+                  cardFlipped={cardFlipped} cardMode={cardMode}
+                  onFlip={() => setCardFlipped(!cardFlipped)}
+                  onMove={moveCard}
+                  onReview={reviewCard}
+                  onFocusMode={() => setFocusMode(!focusMode)}
+                  onOpenSource={openCardSource}
+                  onShowRelated={showRelatedQuestions}
+                />
+              ) : (
+                <p className="empty-state">暂无成长卡片</p>
+              )
+            )}
+
+            {/* 专注模式 */}
+            {focusMode && activeCard && (
+              <div className="focus-overlay" onClick={() => setFocusMode(false)}>
+                <div className="focus-card" onClick={(e) => e.stopPropagation()}>
+                  <div className={`flip-container ${cardFlipped ? "flipped" : ""}`} onClick={() => setCardFlipped((v) => !v)} style={{ minHeight: '340px' }}>
+                    <div className="flipper">
+                      <div className="front">
+                        <div className="text-[14px] font-bold text-[#52525B] mb-3">{activeCard.subject} / {activeCard.core}</div>
+                        <p className="text-[20px] leading-relaxed">{activeCard.front}</p>
+                      </div>
+                      <div className="back">
+                        <div className="text-[14px] font-bold text-[#52525B] mb-3">答案</div>
+                        <p className="text-[18px] leading-relaxed">{activeCard.back}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-center gap-3 mt-4">
+                    <button className="min-h-[36px] px-4 rounded-[8px] bg-[#16A34A] text-white font-bold text-[13px]" onClick={() => { reviewCard(activeCard.id, "认识"); setFocusMode(false); }}>认识 [1]</button>
+                    <button className="min-h-[36px] px-4 rounded-[8px] bg-[#F59E0B] text-white font-bold text-[13px]" onClick={() => { reviewCard(activeCard.id, "模糊"); setFocusMode(false); }}>模糊 [2]</button>
+                    <button className="min-h-[36px] px-4 rounded-[8px] bg-[#EF4444] text-white font-bold text-[13px]" onClick={() => { reviewCard(activeCard.id, "不会"); setFocusMode(false); }}>不会 [3]</button>
+                    <button className="min-h-[36px] px-4 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={() => setFocusMode(false)}>退出</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 管理模式 */}
+            {cardView === "管理" && (
+              <>
+                <div className="metric-grid">
+                  <div><span>当前科目</span><strong>{activeCardSubject || "未选择"}</strong></div>
+                  <div><span>全部卡片</span><strong>{subjectCards.length}</strong></div>
+                  <div><span>今日复习</span><strong>{dueCards.length}</strong></div>
+                  <div><span>收藏卡片</span><strong>{subjectCards.filter((card) => card.favorite).length}</strong></div>
+                </div>
+                <div className="card-grid">
+                  {subjectCards.map((card) => (
+                    <article className="study-card" key={card.id}>
+                      <div className="study-card-head">
+                        <strong>{card.title}</strong>
+                        <span>{card.type}</span>
+                      </div>
+                      <p className="text-[13px]">{cardMode === "填空" ? card.front.replace(/熵变公式|公式|条件/g, "______") : card.front}</p>
+                      <details>
+                        <summary>{cardMode === "背诵" ? "查看背面" : "查看参考答案"}</summary>
+                        <p className="text-[13px]">{card.back}</p>
+                      </details>
+                      <div className="subject-meta">
+                        <span>{card.subject}</span><span>{card.core}</span><span>{card.knowledge}</span>
+                      </div>
+                      <small className="block text-[12px] text-[#71717A] mt-2">来源：{card.source} {card.page} / {card.lastReviewed} / {card.nextReviewAt}</small>
+                      <div className="card-actions">
+                        <button className="text-button text-[12px]" onClick={() => reviewCard(card.id, "认识")}>认识</button>
+                        <button className="text-button text-[12px]" onClick={() => reviewCard(card.id, "模糊")}>模糊</button>
+                        <button className="text-button text-[12px]" onClick={() => reviewCard(card.id, "不会")}>不会</button>
+                        <button className="text-button text-[12px]" onClick={() => setCards((items) => items.map((item) => item.id === card.id ? { ...item, favorite: !item.favorite } : item))}>{card.favorite ? "★收藏" : "收藏"}</button>
+                        <button className="text-button text-[12px]" onClick={() => openCardSource(card)}>来源</button>
+                        <button className="text-button text-[12px]" onClick={() => showRelatedQuestions(card.core, card.knowledge, card.subject)}>真题</button>
+                        <button className="text-button text-[12px]" onClick={() => deleteCard(card)}>删除</button>
+                      </div>
+                    </article>
+                  ))}
+                  {subjectCards.length === 0 && <p className="empty-state">这个科目还没有成长卡片。</p>}
+                </div>
+              </>
+            )}
+
+            {/* 手动创建卡片弹窗 */}
+            {activeDialog === "card" && (
+              <div className="modal-backdrop" role="presentation" onClick={() => setActiveDialog(null)}>
+                <section className="modal-panel" role="dialog" aria-modal="true" aria-label="手动创建成长卡片" onClick={(event) => event.stopPropagation()}>
+                  <div className="modal-head"><div><span>成长卡片</span><strong>手动创建成长卡片</strong></div><button onClick={() => setActiveDialog(null)}>关闭</button></div>
+                  <form className="form-grid" onSubmit={(event) => {
+                    event.preventDefault();
+                    const form = new FormData(event.currentTarget);
+                    const title = String(form.get("title") ?? "").trim();
+                    if (!title) return;
+                    setCards((items) => [{
+                      id: makeId("c"),
+                      title,
+                      front: String(form.get("front") ?? ""),
+                      back: String(form.get("back") ?? ""),
+                      type: String(form.get("type") ?? "概念卡") as GrowthCard["type"],
+                      subject: String(form.get("subject") ?? currentSubject?.name ?? ""),
+                      core: String(form.get("core") ?? "待关联"),
+                      branch: String(form.get("branch") ?? ""),
+                      knowledge: String(form.get("knowledge") ?? ""),
+                      source: String(form.get("source") ?? ""),
+                      page: String(form.get("page") ?? ""),
+                      modes: [cardMode],
+                      createdBy: "手动",
+                      createdAt: today(),
+                      lastReviewed: "未复习",
+                      nextReviewAt: dateOnly(),
+                      mastery: "模糊",
+                      note: "",
+                      favorite: false,
+                    }, ...items]);
+                    pushAssistant(`已创建成长卡片：${title}`);
+                    setActiveDialog(null);
+                    event.currentTarget.reset();
+                  }}>
+                    <label className="field"><span>标题</span><input name="title" /></label>
+                    <label className="field"><span>类型</span><select name="type"><option>公式卡</option><option>概念卡</option><option>填空卡</option><option>推导卡</option><option>条件辨析卡</option><option>错题卡</option></select></label>
+                    <label className="field"><span>科目</span><select name="subject">{subjects.map((subject) => <option key={subject.id}>{subject.name}</option>)}</select></label>
+                    <label className="field"><span>七核</span><select name="core">{coreNames.map((core) => <option key={core}>{core}</option>)}</select></label>
+                    <label className="field"><span>分支</span><input name="branch" /></label>
+                    <label className="field"><span>知识点</span><input name="knowledge" /></label>
+                    <label className="field wide-field"><span>正面</span><input name="front" /></label>
+                    <label className="field wide-field"><span>背面</span><input name="back" /></label>
+                    <label className="field wide-field"><span>来源</span><input name="source" /></label>
+                    <button>创建成长卡片</button>
+                  </form>
+                </section>
+              </div>
+            )}
+          </section>
         )}
 
         {/* Settings Panel */}

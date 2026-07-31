@@ -15,8 +15,12 @@ import {
 } from "./lib/default-data";
 import { STORAGE, TASK, MASTERY, CARD_REVIEW_INTERVALS, CARD_REVIEW_LABELS, TOAST_DURATION, MAX_STUDY_DAYS, MAX_DATE_RANGE_DAYS, CHAT_KEEP_LAST, HEATMAP_SIZE } from "./lib/rules";
 import { loadData, saveData, addStructuredReview, addMemoryItem, getMemoriesByType, createEmptyMemoryData } from "./lib/storage";
+import { savePdfFile, deletePdfFile } from "./lib/pdf-storage";
 import { extractReviewFields, extractMemories, classifyMemory, generateMemoryId, isDuplicateMemory } from "./lib/memory-rules";
 import type { StructuredReview, MemoryItem } from "./lib/types";
+import { loadLearningEvents, appendLearningEvent, type LearningEvent } from "./lib/events";
+import { computeReplayComparison, computeProgressComparison } from "./lib/replay-console";
+import { projectKnowledgeState } from "./lib/projection";
 import { s, drawerShadow } from "./lib/css-utils";
 import styles from "../styles/workspace.module.css";
 import { Sidebar } from "./components/Sidebar";
@@ -100,6 +104,7 @@ export default function Home() {
   const [questionFilter, setQuestionFilter] = useState({ subject: "全部", core: "全部", result: "全部", keyword: "" });
   const [readingMode, setReadingMode] = useState(false);
   const [studyDays, setStudyDays] = useState<StudyDay[]>(seedStudyDays);
+  const [learningEvents, setLearningEvents] = useState<LearningEvent[]>([]);
   const [decks, setDecks] = useState<CardDeck[]>(seedDecks);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [focusMode, setFocusMode] = useState(false);
@@ -174,6 +179,31 @@ export default function Home() {
     setHydratedTodayStr(dateOnly());
     setHydratedDaysLeft(Math.max(0, Math.ceil((new Date(exam.examDate).getTime() - Date.now()) / 86400000)));
   }, [exam.examDate]);
+
+  // ─── LearningEvent: load v4 events on mount (Sprint 1 / Phase A) ───
+  useEffect(() => {
+    setLearningEvents(loadLearningEvents());
+  }, []);
+
+  // ─── Sprint 2A/2B-1: 开发模式 Replay + Progress 对照（仅 console，不接 UI）───
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    const summary = computeReplayComparison(learningEvents, nodes);
+    if (summary.warnings > 0) {
+      console.warn(`[MemoryEngine] ${summary.warnings} 个节点投影与当前状态存在差异（Sprint 2A 观察期，不影响 UI）`);
+    }
+    // Sprint 2B-1: Legacy vs Projected Dashboard Progress 对照
+    const states = projectKnowledgeState(learningEvents, nodes);
+    const confirmedQuestions = questions.filter((q) => q.confirmed).length;
+    const indexedResources = resources.filter((r) => r.status === "已索引").length;
+    computeProgressComparison(states, subjects, {
+      nodeMasteryScores: nodes.map((n) => n.masteryScore),
+      confirmedQuestions,
+      totalQuestions: questions.length,
+      indexedResources,
+      totalResources: resources.length,
+    });
+  }, [learningEvents, nodes, subjects, questions, resources]);
 
   // ─── localStorage load (hydrate from saved state) ───
   useEffect(() => {
@@ -323,17 +353,21 @@ export default function Home() {
     setReaderPage(resource.currentPage || "1");
     setActiveKnowledgePanel("resources");
     setActiveView("knowledge");
+    // Stabilization 1A-5: 记录最近打开页码（用于刷新后恢复阅读位置）
+    setResources((items) => items.map((item) => item.id === resource.id
+      ? { ...item, lastOpenedPage: resource.currentPage || "1", lastRead: "刚刚" }
+      : item));
     setNotice(`已打开资料：${resource.name}`);
   }
 
-  function addResource(event: FormEvent<HTMLFormElement>) {
+  async function addResource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const file = form.get("file") as File | null;
     const rawName = String(file?.name || form.get("sourceText") || "").trim();
     if (!rawName) return;
     const inferred = inferResource(rawName, String(form.get("subjectHint") ?? ""));
-    const resource: Resource = {
+    const base: Resource = {
       id: makeId("r"),
       name: inferred.name,
       subject: inferred.subject,
@@ -349,22 +383,84 @@ export default function Home() {
       lastRead: "",
       readingMinutes: "",
       linkedNode: inferred.linkedNode,
+      kind: "demo",
+      createdAt: new Date().toISOString(),
     };
-    setResources((items) => [resource, ...items]);
-    setPending((items) => [
-      { id: makeId("p"), kind: inferred.type.includes("真题") ? "真题识别" : "资料切分", title: resource.name, subject: inferred.subject, detail: `AI识别结果：科目 ${inferred.subject}；类型 ${inferred.type}；${inferred.pages}；${inferred.linkedNode}；${inferred.duplicate ? "疑似重复上传" : "未发现重复"}`, status: "待确认", targetId: resource.id },
-      ...items,
-    ]);
+    // Stabilization 1A-1: 真实 PDF 文件 → IndexedDB（绝不写入 localStorage）
+    if (file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"))) {
+      try {
+        const stored = await savePdfFile(file);
+        const resource: Resource = {
+          ...base,
+          kind: "pdf",
+          fileStorageKey: stored.fileStorageKey,
+          size: stored.size,
+          mimeType: stored.mimeType,
+        };
+        resource.pages = `PDF 文件 · ${(stored.size / 1024).toFixed(1)} KB`;
+        setResources((items) => [resource, ...items]);
+        setPending((items) => [
+          { id: makeId("p"), kind: inferred.type.includes("真题") ? "真题识别" : "资料切分", title: resource.name, subject: inferred.subject, detail: `PDF 已存入本地（IndexedDB）· 科目 ${inferred.subject}；类型 ${inferred.type}；${inferred.duplicate ? "疑似重复上传" : "未发现重复"}`, status: "待确认", targetId: resource.id },
+          ...items,
+        ]);
+        pushAssistant(`PDF 已保存并可阅读：${resource.name}。`);
+      } catch (err) {
+        pushAssistant(`PDF 保存失败：${String(err)}`);
+        setActiveDialog(null);
+        return;
+      }
+    } else {
+      // 演示/非 PDF 资源：保留标注 demo，避免伪装成真实 PDF
+      setResources((items) => [base, ...items]);
+      setPending((items) => [
+        { id: makeId("p"), kind: inferred.type.includes("真题") ? "真题识别" : "资料切分", title: base.name, subject: inferred.subject, detail: `AI识别结果：科目 ${inferred.subject}；类型 ${inferred.type}；${inferred.pages}；演示/空白资源`, status: "待确认", targetId: base.id },
+        ...items,
+      ]);
+      pushAssistant(`已添加演示/空白资料：${base.name}。`);
+    }
     setActiveKnowledgeSubject(inferred.subject);
-    pushAssistant(`AI已识别资料：${resource.name}。请确认后写入知识中心。`);
     setActiveDialog(null);
-    event.currentTarget.reset();
   }
 
   function deleteResource(item: Resource) {
     setLastDeleted({ collection: "resources", item, label: item.name });
     setResources((items) => items.filter((resource) => resource.id !== item.id));
+    // Stabilization 1A-6: 同步清理 IndexedDB 中的 PDF 二进制
+    if (item.kind === "pdf" && item.fileStorageKey) {
+      deletePdfFile(item.fileStorageKey).catch(() => {});
+    }
+    // 清理关联批注
+    setAnnotations((items) => items.filter((annotation) => annotation.resourceId !== item.id));
     setNotice(`已删除资源：${item.name}`);
+  }
+
+  // ─── Stabilization 1A-3/1A-4: 批注创建 / 编辑 / 删除（持久化经 save effect）───
+  function onCreateAnnotation(page: string, selection: string, tag: Annotation["tag"], note: string) {
+    if (!activeResource) return;
+    const annotation: Annotation = {
+      id: makeId("a"),
+      resourceId: activeResource.id,
+      resourceName: activeResource.name,
+      page,
+      selection,
+      tag,
+      note,
+      linkedNode: activeResource.linkedNode || "待关联",
+      createdAt: today(),
+      handled: false,
+      updatedAt: today(),
+    };
+    setAnnotations((items) => [annotation, ...items]);
+    setNotice(`已添加批注：${selection.slice(0, 20)}`);
+  }
+
+  function onEditAnnotation(id: string, note: string) {
+    setAnnotations((items) => items.map((item) => item.id === id ? { ...item, note, updatedAt: today() } : item));
+  }
+
+  function onDeleteAnnotation(id: string) {
+    setAnnotations((items) => items.filter((item) => item.id !== id));
+    setNotice("已删除批注");
   }
 
   function addQuestion(event: FormEvent<HTMLFormElement>) {
@@ -476,10 +572,22 @@ export default function Home() {
   }
 
   function reviewCard(id: string, mastery: GrowthCard["mastery"]) {
+    const card = cards.find((c) => c.id === id);
     const intervalDays = mastery === "不会" ? 1 : mastery === "模糊" ? 3 : mastery === "认识" ? 7 : mastery === "熟练" ? 14 : 30;
     setCards((items) => items.map((card) => card.id === id ? { ...card, mastery, lastReviewed: today(), nextReviewAt: dateOnly(intervalDays) } : card));
     const interval = mastery === "不会" ? "明天" : mastery === "模糊" ? "3 天后" : mastery === "认识" ? "7 天后" : mastery === "熟练" ? "14 天后" : "30 天后";
     pushAssistant(`已记录卡片掌握状态：${mastery}。下次建议复习：${interval}。`);
+    // LearningEvent: card_reviewed（Sprint 1 / Phase A，纯副作用采集）
+    setLearningEvents((prev) => appendLearningEvent(prev, {
+      type: "card_reviewed",
+      sourceRef: {
+        kind: "card",
+        id,
+        subjectId: card?.subject,
+        nodeIds: nodes.filter((n) => n.knowledge === card?.knowledge || n.core === card?.core).map((n) => n.id),
+      },
+      payload: { mastery, intervalDays },
+    }));
     setCardFlipped(false);
     setCardIndex((index) => Math.min(index + 1, Math.max(cardQueue.length - 1, 0)));
   }
@@ -606,6 +714,22 @@ export default function Home() {
     });
     recordStudyDay(Number(actualMinutesValue || task.minutes || 0), task.done ? 0 : 1);
     const accuracyNumber = Number(task.accuracy || 0);
+    // LearningEvent: study_completed（Sprint 1 / Phase A，纯副作用采集）
+    setLearningEvents((prev) => appendLearningEvent(prev, {
+      type: "study_completed",
+      sourceRef: {
+        kind: "task",
+        id: task.id,
+        subjectId: task.subject,
+        nodeIds: nodes.filter((n) => n.knowledge === task.branch || n.core === task.core).map((n) => n.id),
+      },
+      payload: {
+        minutes: Number(actualMinutesValue || task.minutes || 0),
+        accuracy: accuracyNumber || undefined,
+        masteryBefore: task.masteryBefore ?? undefined,
+        masteryAfter: task.masteryAfter ?? undefined,
+      },
+    }));
     if (accuracyNumber && accuracyNumber < 60) {
       setNodes((items) => items.map((node) =>
         node.knowledge === task.branch || node.core === task.core
@@ -1215,7 +1339,9 @@ export default function Home() {
                           onMarkRead={() => {}} onToggleFavorite={() => {}}
                           onShowRelated={showRelatedQuestions}
                           onCreateCard={(text, annotation) => { createCardFromText("资料批注", text, annotation); setActiveView("cards"); setCardView("复习"); }}
-                          onDeleteAnnotation={() => {}} onEditAnnotation={() => {}}
+                          onCreateAnnotation={onCreateAnnotation}
+                          onDeleteAnnotation={onDeleteAnnotation}
+                          onEditAnnotation={onEditAnnotation}
                           onJumpToPage={setReaderPage}
                         />
                       </div>
@@ -1270,7 +1396,21 @@ export default function Home() {
                           <details className="inline-details">
                             <summary>做题记录/编辑</summary>
                             <div className="mini-form">
-                              <label><span>做题结果</span><select value={question.result} onChange={(event) => setQuestions((items) => items.map((item) => item.id === question.id ? { ...item, result: event.target.value as Question["result"], done: event.target.value !== "未做" } : item))}><option>未做</option><option>正确</option><option>错误</option></select></label>
+                              <label><span>做题结果</span><select value={question.result} onChange={(event) => {
+                                const result = event.target.value as Question["result"];
+                                setQuestions((items) => items.map((item) => item.id === question.id ? { ...item, result, done: result !== "未做" } : item));
+                                // LearningEvent: question_answered（Sprint 1 / Phase A，纯副作用采集）
+                                setLearningEvents((prev) => appendLearningEvent(prev, {
+                                  type: "question_answered",
+                                  sourceRef: {
+                                    kind: "question",
+                                    id: question.id,
+                                    subjectId: question.subject,
+                                    nodeIds: nodes.filter((n) => n.core === question.core).map((n) => n.id),
+                                  },
+                                  payload: { result, errorReason: question.errorReason || undefined },
+                                }));
+                              }}><option>未做</option><option>正确</option><option>错误</option></select></label>
                               <label><span>错误原因</span><input value={question.errorReason} onChange={(event) => setQuestions((items) => items.map((item) => item.id === question.id ? { ...item, errorReason: event.target.value } : item))} /></label>
                               <label><span>用户笔记</span><input value={question.note} onChange={(event) => setQuestions((items) => items.map((item) => item.id === question.id ? { ...item, note: event.target.value } : item))} /></label>
                               <button type="button" onClick={() => setQuestions((items) => items.map((item) => item.id === question.id ? { ...item, favorite: !item.favorite } : item))}>{question.favorite ? "取消收藏" : "收藏"}</button>

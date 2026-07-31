@@ -1,8 +1,12 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { Resource, Question, Annotation, AnnotationTag, KnowledgeNode } from "../lib/types";
-import { ANNOTATION_COLORS } from "../lib/types";
+import {
+  ANNOTATION_COLORS, UNKNOWN_ANNOTATION_TAG, UNKNOWN_ANNOTATION_COLOR,
+  resolveAnnotationColor, isAnnotationTag,
+} from "../lib/types";
+import { loadPdfBlob } from "../lib/pdf-storage";
 import styles from "../../styles/components.module.css";
 
 interface ReaderPanelProps {
@@ -115,6 +119,17 @@ function searchInContent(
   return { before, match, after };
 }
 
+/** Stabilization 1A-2: 配置 pdfjs worker（Vite 环境下解析 worker 资源路径） */
+function ensurePdfWorker(pdfjsLib: { GlobalWorkerOptions: { workerSrc?: string } }) {
+  if (!pdfjsLib.GlobalWorkerOptions?.workerSrc) {
+    try {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+    } catch {
+      // worker 路径不可解析：由错误矩阵 1A-2e 兜底
+    }
+  }
+}
+
 export function ReaderPanel({
   activeResource, readerSearch, readerPage, readerZoom,
   favoritePages, activePageKey, relatedQuestions, subjectAnnotations, subjectNodes,
@@ -128,10 +143,17 @@ export function ReaderPanel({
   const [showNewAnnotation, setShowNewAnnotation] = useState(false);
   const [newAnnotationText, setNewAnnotationText] = useState("");
   const [newAnnotationTag, setNewAnnotationTag] = useState<AnnotationTag>("重点");
+  // Stabilization 1A-2: PDF.js 状态
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pdfTotalPages, setPdfTotalPages] = useState<number | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
 
   const annotationCount = subjectAnnotations.length;
   const currentPage = Number(readerPage) || 1;
-  const maxPages = Math.max(1, currentPage + 20); // simulate page range
+  const isRealPdf = activeResource?.kind === "pdf" && !!activeResource?.fileStorageKey;
+  const maxPages = isRealPdf && pdfTotalPages ? pdfTotalPages : Math.max(1, currentPage + 20); // demo: simulate page range
 
   // Generate dynamic page content
   const pageContent = useMemo(() =>
@@ -145,17 +167,22 @@ export function ReaderPanel({
     [activeResource, subjectNodes, relatedQuestions, currentPage]
   );
 
-  const annotationsByTag = useMemo(() =>
-    subjectAnnotations.reduce<Record<AnnotationTag, Annotation[]>>(
+  const annotationsByTag = useMemo(() => {
+    const grouped = subjectAnnotations.reduce<Record<AnnotationTag, Annotation[]> & { unknown: Annotation[] }>(
       (acc, ann) => {
-        if (!acc[ann.tag]) acc[ann.tag] = [];
+        // 显式隔离：非法历史标签不进入合法分组（不崩溃、不掩盖）
+        if (!isAnnotationTag(ann.tag)) {
+          acc.unknown.push(ann);
+          return acc;
+        }
         acc[ann.tag].push(ann);
         return acc;
       },
-      { "重点": [], "疑问": [], "易错": [], "总结": [], "核心概念": [] }
-    ),
-    [subjectAnnotations]
-  );
+      { "重点": [], "疑问": [], "易错": [], "总结": [], "核心概念": [], unknown: [] }
+    );
+    // 修复历史类型：兼容早期直接把 legal tag 用作键但缺少 unknown 字段的写法
+    return grouped;
+  }, [subjectAnnotations]);
 
   // Font size based on zoom
   const fontSizeClass = readerZoom === "80%" ? styles.readerContentSmall
@@ -180,6 +207,134 @@ export function ReaderPanel({
     setNewAnnotationTag("重点");
     setShowNewAnnotation(false);
   }, [newAnnotationText, newAnnotationTag, currentPage, onCreateAnnotation]);
+
+  // ─── Stabilization 1A-2: PDF 加载（IndexedDB → pdfjs-dist → Blob URL）───
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    async function loadPdf() {
+      setPdfError(null);
+      setPdfTotalPages(null);
+      if (!isRealPdf || !activeResource?.fileStorageKey) {
+        return;
+      }
+      setPdfLoading(true);
+      try {
+        // 1A-2a: 文件不存在（IndexedDB 无记录）→ loadPdfBlob 返回 null
+        const blob = await loadPdfBlob(activeResource.fileStorageKey);
+        if (cancelled) return;
+        if (!blob) {
+          setPdfError("文件不存在或已被清理");
+          return;
+        }
+        // 1A-2c: 非 PDF 类型校验
+        if (!blob.type.includes("pdf") && !blob.type.startsWith("application/octet-stream")) {
+          setPdfError("文件损坏或不是有效 PDF");
+          return;
+        }
+        // 动态加载 pdfjs-dist（1A-2e: worker 加载失败单独捕获）
+        let pdfjsLib: typeof import("pdfjs-dist") | null = null;
+        try {
+          pdfjsLib = await import("pdfjs-dist");
+        } catch {
+          if (!cancelled) setPdfError("PDF 解析引擎加载失败");
+          return;
+        }
+        if (cancelled) return;
+        ensurePdfWorker(pdfjsLib as typeof import("pdfjs-dist"));
+        objectUrl = URL.createObjectURL(blob);
+        const pdf = await pdfjsLib.getDocument(objectUrl).promise;
+        if (cancelled) return;
+        setPdfTotalPages(pdf.numPages);
+        // 打开资源后跳回上次页码（1A-5）
+        const lastPage = activeResource.lastOpenedPage || "1";
+        const pageNum = Math.min(Math.max(1, Number(lastPage) || 1), pdf.numPages);
+        onSetReaderPage(String(pageNum));
+      } catch (err) {
+        if (cancelled) return;
+        const msg = String((err as Error)?.message || err);
+        // 1A-2d: 加密 PDF
+        if (msg.includes("PasswordException") || msg.includes("password")) {
+          setPdfError("文档已加密，暂不支持打开");
+        } else if (msg.includes("InvalidPDFException") || msg.includes("Invalid PDF")) {
+          setPdfError("文件损坏或不是有效 PDF");
+        } else {
+          setPdfError(`读取本地文件失败，请重试（${msg.slice(0, 60)}）`);
+        }
+      } finally {
+        if (!cancelled) setPdfLoading(false);
+      }
+    }
+
+    loadPdf();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      // 取消进行中的渲染任务
+      renderTaskRef.current?.cancel();
+      renderTaskRef.current = null;
+    };
+  }, [activeResource?.id, activeResource?.fileStorageKey]);
+
+  // ─── Stabilization 1A-2: 当前页 Canvas 渲染（含 1A-2f 单页渲染失败重试）───
+  useEffect(() => {
+    let cancelled = false;
+    if (!isRealPdf || !pdfTotalPages || !activeResource?.fileStorageKey) return;
+
+    async function renderPage() {
+      setPdfError(null);
+      setPdfLoading(true);
+      try {
+        const blob = await loadPdfBlob(activeResource.fileStorageKey!);
+        if (cancelled || !blob) return;
+        const pdfjsLib = await import("pdfjs-dist");
+        if (cancelled) return;
+        ensurePdfWorker(pdfjsLib as typeof import("pdfjs-dist"));
+        const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
+        if (cancelled) return;
+        const page = await pdf.getPage(Math.min(currentPage, pdf.numPages));
+        if (cancelled) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const viewport = page.getViewport({ scale: (Number(readerZoom.replace("%", "")) || 100) / 100 });
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const renderTask = page.render({ canvasContext: ctx, viewport });
+        renderTaskRef.current = renderTask;
+        try {
+          await renderTask.promise;
+        } catch (err) {
+          if (cancelled) return;
+          const msg = String((err as Error)?.message || err);
+          if (!msg.includes("cancelled")) {
+            // 1A-2f: 单页渲染失败 →「第 N 页渲染失败」+ 重试一次
+            try {
+              await page.render({ canvasContext: ctx, viewport }).promise;
+            } catch {
+              if (!cancelled) setPdfError(`第 ${currentPage} 页渲染失败`);
+            }
+          }
+        } finally {
+          renderTaskRef.current = null;
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setPdfError(`读取本地文件失败，请重试`);
+      } finally {
+        if (!cancelled) setPdfLoading(false);
+      }
+    }
+
+    renderPage();
+    return () => {
+      cancelled = true;
+      renderTaskRef.current?.cancel();
+      renderTaskRef.current = null;
+    };
+  }, [isRealPdf, pdfTotalPages, currentPage, readerZoom, activeResource?.fileStorageKey]);
 
   return (
     <div className={styles.readerGrid}>
@@ -255,46 +410,89 @@ export function ReaderPanel({
           </div>
         )}
 
-        {/* ═══ 内容区 ═══ */}
+        {/* ═══ 内容区（1A-2g：真实 PDF → canvas；demo → 模拟文本 + 演示标注） ═══ */}
         <div className={`${styles.readerContent} ${fontSizeClass}`}>
-          {annotationCount > 0 ? (
-            <div className="space-y-2">
-              {subjectAnnotations.map((ann) => {
-                const color = ANNOTATION_COLORS[ann.tag];
-                return (
-                  <div key={ann.id} className={styles.annotatedText} style={{ borderColor: color.border }}>
-                    <p className={styles.contentText}>{ann.selection}</p>
-                    <div className={styles.annotatedTextTag}>
-                      <span>{color.dot}</span>
-                      <span className={styles.annotatedTextTagLabel}>{ann.tag}</span>
-                      {ann.note && (
-                        <span className={styles.annotatedTextNote}>· {ann.note}</span>
-                      )}
-                    </div>
+          {isRealPdf ? (
+            pdfError ? (
+              <div className="p-6 rounded-[8px] bg-[#FEF2F2] border border-[#DC2626] text-[#DC2626] text-[13px]">
+                ⚠️ {pdfError}
+              </div>
+            ) : (
+              <>
+                {pdfLoading && (
+                  <p className="text-[12px] text-[#71717A] mb-2">正在加载 PDF…</p>
+                )}
+                <canvas ref={canvasRef} style={{ maxWidth: "100%", border: "1px solid #E4E4E7", borderRadius: 8 }} />
+                {annotationCount > 0 && (
+                  <div className="space-y-2 mt-4">
+                    {subjectAnnotations.filter((ann) => Number(ann.page) === currentPage).map((ann) => {
+                      const color = resolveAnnotationColor(ann.tag);
+                      return (
+                        <div key={ann.id} className={styles.annotatedText} style={{ borderColor: color.border }}>
+                          <p className={styles.contentText}>{ann.selection}</p>
+                          <div className={styles.annotatedTextTag}>
+                            <span>{color.dot}</span>
+                            <span className={styles.annotatedTextTagLabel}>
+                              {isAnnotationTag(ann.tag) ? ann.tag : UNKNOWN_ANNOTATION_TAG}
+                            </span>
+                            {ann.note && (
+                              <span className={styles.annotatedTextNote}>· {ann.note}</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-              <p className={styles.contentText} style={{ color: "#A1A1AA", paddingTop: 4 }}>··· 其余内容</p>
-            </div>
+                )}
+              </>
+            )
           ) : (
-            <div className="space-y-3">
-              {pageContent.map((para, i) => {
-                // Apply search highlighting if search is active
-                if (readerSearch.trim()) {
-                  const result = searchInContent(para, readerSearch);
-                  if (result) {
+            <>
+              <div className="mb-3 px-2 py-1 rounded-[6px] bg-[#F4F4F5] text-[11px] text-[#71717A] inline-block">
+                📄 演示模式（Demo）— 非真实 PDF 文件，内容由本地数据模拟生成
+              </div>
+              {annotationCount > 0 ? (
+                <div className="space-y-2">
+                  {subjectAnnotations.map((ann) => {
+                    const color = resolveAnnotationColor(ann.tag);
                     return (
-                      <p key={i} className={styles.contentText}>
-                        {result.before}
-                        <span className={styles.searchHighlight}>{result.match}</span>
-                        {result.after}
-                      </p>
+                      <div key={ann.id} className={styles.annotatedText} style={{ borderColor: color.border }}>
+                        <p className={styles.contentText}>{ann.selection}</p>
+                        <div className={styles.annotatedTextTag}>
+                          <span>{color.dot}</span>
+                          <span className={styles.annotatedTextTagLabel}>
+                            {isAnnotationTag(ann.tag) ? ann.tag : UNKNOWN_ANNOTATION_TAG}
+                          </span>
+                          {ann.note && (
+                            <span className={styles.annotatedTextNote}>· {ann.note}</span>
+                          )}
+                        </div>
+                      </div>
                     );
-                  }
-                }
-                return <p key={i} className={styles.contentText}>{para}</p>;
-              })}
-            </div>
+                  })}
+                  <p className={styles.contentText} style={{ color: "#A1A1AA", paddingTop: 4 }}>··· 其余内容</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {pageContent.map((para, i) => {
+                    // Apply search highlighting if search is active
+                    if (readerSearch.trim()) {
+                      const result = searchInContent(para, readerSearch);
+                      if (result) {
+                        return (
+                          <p key={i} className={styles.contentText}>
+                            {result.before}
+                            <span className={styles.searchHighlight}>{result.match}</span>
+                            {result.after}
+                          </p>
+                        );
+                      }
+                    }
+                    return <p key={i} className={styles.contentText}>{para}</p>;
+                  })}
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -416,7 +614,7 @@ export function ReaderPanel({
             {(["重点", "易错", "疑问", "总结", "核心概念"] as AnnotationTag[]).map((tag) => {
               const items = annotationsByTag[tag];
               if (!items.length) return null;
-              const color = ANNOTATION_COLORS[tag];
+              const color = resolveAnnotationColor(tag);
               return (
                 <div key={tag} style={{ marginBottom: 8 }}>
                   <div className={styles.annotationSectionHead}>
@@ -450,6 +648,34 @@ export function ReaderPanel({
                 </div>
               );
             })}
+
+            {/* ⚠ 显式隔离渲染：非法历史标签分组（红色警告，不崩溃） */}
+            {annotationsByTag.unknown.length > 0 && (
+              <div style={{ marginBottom: 8 }}>
+                <div className={styles.annotationSectionHead}
+                  style={{ color: "#DC2626" }}>
+                  <span>⚠️</span>
+                  <span className={styles.annotationSectionLabel}>{UNKNOWN_ANNOTATION_TAG}</span>
+                  <span className={styles.annotationSectionCount}>{annotationsByTag.unknown.length}</span>
+                </div>
+                <div className={styles.annotationSectionLabel}
+                  style={{ color: "#DC2626", fontSize: 11, marginBottom: 4 }}>
+                  {UNKNOWN_ANNOTATION_COLOR.label}
+                </div>
+                {annotationsByTag.unknown.map((item) => (
+                  <div key={item.id} className={styles.annotationItem}
+                    style={{ backgroundColor: "#FEF2F2", borderLeft: "3px solid #DC2626" }}
+                    onClick={() => onJumpToPage(item.page)}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
+                      <span className={styles.annotationPage} style={{ color: "#DC2626" }}>P{item.page}</span>
+                      <span style={{ fontSize: 11, color: "#DC2626" }}>非法标签: {String(item.tag)}</span>
+                    </div>
+                    <p className={styles.annotationText}>{item.selection}</p>
+                    {item.note && <p className={styles.annotationNote}>✏ {item.note}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {annotationCount === 0 && (
               <div className={styles.annotationEmpty}>

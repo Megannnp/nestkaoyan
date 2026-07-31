@@ -5,7 +5,8 @@
  * 所有规则使用正则表达式匹配用户输入。
  */
 
-import type { MemoryType } from "./types";
+import type { MemoryType, Risk, KnowledgeNode } from "./types.ts";
+import type { LearningEvent } from "./events.ts";
 
 export type MemoryRule = {
   /** 正则模式 */
@@ -347,3 +348,126 @@ export function isDuplicateMemory(
 export function generateMemoryId(): string {
   return `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+// ════════════════════════════════════════════════════════════
+// Sprint 2A: Knowledge Projection 规则引擎
+// ════════════════════════════════════════════════════════════
+// 所有知识状态投影规则统一收口在此文件。
+// projectKnowledgeState() 不得内联业务规则，只能调用本引擎。
+// 这样修改算法时只需改规则集，无需改投影函数。
+// ════════════════════════════════════════════════════════════
+
+/** 投影规则结果 */
+export type ProjectionApplyResult = {
+  /** 投影后的掌握度（0-100，clamp） */
+  masteryScore: number;
+  /** 掌握层级（0-4，clamp） */
+  masteryLevel: number;
+  /** 错题计数 */
+  mistakes: number;
+  /** 复习计数 */
+  reviewCount: number;
+  /** 遗忘风险（0-100，clamp） */
+  forgetRisk: number;
+  /** 复习风险 */
+  reviewRisk: Risk;
+};
+
+/** 当前节点的投影累计摘要（不含具体影响哪个事件，由 projection 层跟踪 sourceEventId） */
+export type KnowledgeProjectionAccumulator = {
+  masteryScore: number;
+  masteryLevel: number;
+  mistakes: number;
+  reviewCount: number;
+  forgetRisk: number;
+  reviewRisk: Risk;
+};
+
+/**
+ * 投影规则集。
+ * 每个规则函数输入：事件 + 当前节点投影 + 累积器 → 返回更新后的累积器与风险。
+ * 规则必须为纯函数（无副作用、无 Date.now / Math.random / 全局读）。
+ */
+export const KNOWLEDGE_PROJECTION_RULES = {
+  /** 处理一条对某节点生效的事件 */
+  applyEvent: (
+    acc: KnowledgeProjectionAccumulator,
+    event: LearningEvent,
+    node: Pick<KnowledgeNode, "masteryScore" | "mistakes">
+  ): KnowledgeProjectionAccumulator => {
+    let { masteryScore, masteryLevel, mistakes, reviewCount, forgetRisk } = acc;
+
+    if (event.type === "question_answered") {
+      if (event.payload.result === "错误") {
+        // 做错题：掌握度 -8，错题 +1，遗忘风险 +10
+        mistakes += 1;
+        masteryScore = Math.max(0, masteryScore - 8);
+        masteryLevel = masteryLevel > 0 ? masteryLevel - 1 : 0;
+        forgetRisk = Math.min(100, forgetRisk + 10);
+      } else if (event.payload.result === "正确") {
+        // 做对题：掌握度 +5
+        masteryScore = Math.min(100, masteryScore + 5);
+        forgetRisk = Math.max(0, forgetRisk - 5);
+      }
+    } else if (event.type === "card_reviewed") {
+      // 卡片复习：复习计数 +1，按掌握档位调整掌握度
+      reviewCount += 1;
+      const mastery = event.payload.mastery;
+      if (mastery === "不会") {
+        masteryScore = Math.max(0, masteryScore - 2);
+        masteryLevel = masteryLevel > 0 ? masteryLevel - 1 : 0;
+        forgetRisk = Math.min(100, forgetRisk + 15);
+      } else if (mastery === "模糊") {
+        masteryScore = Math.max(0, masteryScore + 2);
+        forgetRisk = Math.min(100, forgetRisk + 8);
+      } else if (mastery === "认识") {
+        masteryScore = Math.min(100, masteryScore + 5);
+        forgetRisk = Math.max(0, forgetRisk - 10);
+      } else if (mastery === "熟练") {
+        masteryScore = Math.min(100, masteryScore + 8);
+        forgetRisk = Math.max(0, forgetRisk - 20);
+      } else if (mastery === "稳定") {
+        masteryScore = Math.min(100, masteryScore + 12);
+        forgetRisk = Math.max(0, forgetRisk - 30);
+      }
+    } else if (event.type === "study_completed" && node && event.payload.accuracy !== undefined) {
+      // 任务完成且正确率 < 60：掌握度 -8（与旧逻辑一致）
+      if (event.payload.accuracy < 60) {
+        masteryScore = Math.max(0, masteryScore - 8);
+        masteryLevel = masteryLevel > 0 ? masteryLevel - 1 : 0;
+        forgetRisk = Math.min(100, forgetRisk + 10);
+      } else {
+        // 正确率 >= 60：掌握度 +5
+        masteryScore = Math.min(100, masteryScore + 5);
+        forgetRisk = Math.max(0, forgetRisk - 5);
+      }
+    }
+
+    // 推导风险等级
+    let reviewRisk: Risk = acc.reviewRisk;
+    if (masteryScore < 30) reviewRisk = "高风险";
+    else if (masteryScore < 50) reviewRisk = "需要关注";
+    else reviewRisk = "正常";
+
+    return {
+      masteryScore,
+      masteryLevel,
+      mistakes,
+      reviewCount,
+      forgetRisk,
+      reviewRisk,
+    };
+  },
+
+  /** 初始化累积器：以节点当前状态为起点 */
+  createInitialAccumulator: (
+    node: Pick<KnowledgeNode, "masteryScore" | "mistakes" | "masteryLevel">
+  ): KnowledgeProjectionAccumulator => ({
+    masteryScore: node.masteryScore,
+    masteryLevel: node.masteryLevel,
+    mistakes: node.mistakes,
+    reviewCount: 0,
+    forgetRisk: 0,
+    reviewRisk: node.masteryScore < 30 ? "高风险" : node.masteryScore < 50 ? "需要关注" : "正常",
+  }),
+} as const;

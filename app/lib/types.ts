@@ -63,6 +63,18 @@ export type Resource = {
   lastRead: string;
   readingMinutes: string;
   linkedNode: string;
+  /** Stabilization 1A: 资源种类——真实 PDF（IndexedDB）或演示（Demo 模拟） */
+  kind?: "pdf" | "demo";
+  /** Stabilization 1A: IndexedDB 中 PDF 文件主键（仅 kind === "pdf"） */
+  fileStorageKey?: string;
+  /** Stabilization 1A: 文件大小（字节） */
+  size?: number;
+  /** Stabilization 1A: MIME 类型 */
+  mimeType?: string;
+  /** Stabilization 1A: 创建/导入时间 */
+  createdAt?: string;
+  /** Stabilization 1A: 最近打开页码（自动记录） */
+  lastOpenedPage?: string;
 };
 
 export type Question = {
@@ -249,20 +261,24 @@ export type GrowthCard = {
   favorite: boolean;
 };
 
-/** 批注颜色标签定义 */
-export type AnnotationTag =
+/** 批注合法标签的显式集合（唯一权威来源；新增/删除标签必须改这里） */
+export const ANNOTATION_TAGS = [
   /** 🟡 重要公式、定义、结论 */
-  | "重点"
+  "重点",
   /** 🔵 暂时没理解、需要继续追问 */
-  | "疑问"
+  "疑问",
   /** 🔴 容易混淆、容易用错、容易漏条件 */
-  | "易错"
+  "易错",
   /** 🟢 自己的理解、归纳和记忆方法 */
-  | "总结"
-  /** ⚪ 旧版默认标签（兼容历史数据，避免 ANNOTATION_COLORS[tag] 为 undefined） */
-  | "核心概念";
+  "总结",
+  /** ⚪ 旧版默认标签（兼容历史数据） */
+  "核心概念",
+] as const;
 
-/** 批注颜色映射 */
+/** 批注颜色标签定义（合法值限于 ANNOTATION_TAGS） */
+export type AnnotationTag = (typeof ANNOTATION_TAGS)[number];
+
+/** 批注颜色映射（必须覆盖 ANNOTATION_TAGS 全部成员） */
 export const ANNOTATION_COLORS: Record<AnnotationTag, { dot: string; bg: string; border: string; label: string }> = {
   "重点": { dot: "🟡", bg: "#FEF9C3", border: "#EAB308", label: "重要公式、定义、结论" },
   "疑问": { dot: "🔵", bg: "#DBEAFE", border: "#3B82F6", label: "暂时没理解、需要继续追问" },
@@ -270,6 +286,35 @@ export const ANNOTATION_COLORS: Record<AnnotationTag, { dot: string; bg: string;
   "总结": { dot: "🟢", bg: "#DCFCE7", border: "#22C55E", label: "自己的理解、归纳和记忆方法" },
   "核心概念": { dot: "⚪", bg: "#F4F4F5", border: "#A1A1AA", label: "核心概念、定义" },
 };
+
+/** 异常标签的显式降级样式（⚠ 表示非法/未知历史值；不是静默默认） */
+export const UNKNOWN_ANNOTATION_TAG = "⚠ 未知标签";
+
+/** 异常标签显式降级颜色（红色警告，明确标识坏数据） */
+export const UNKNOWN_ANNOTATION_COLOR = {
+  dot: "⚠️",
+  bg: "#FEF2F2",
+  border: "#DC2626",
+  label: "非法/未知历史标签（数据异常，需人工清理）",
+} as const;
+
+/**
+ * 显式校验：判断任意值是否为合法批注标签。
+ * 历史数据中的非法 tag（空串、大小写变体、未知字符串）一律返回 false。
+ */
+export function isAnnotationTag(tag: unknown): tag is AnnotationTag {
+  return typeof tag === "string" && (ANNOTATION_TAGS as readonly string[]).includes(tag);
+}
+
+/**
+ * 显式解析标签颜色：合法标签 → 映射颜色；非法标签 → UNKNOWN_ANNOTATION_COLOR。
+ * 绝不让调用方拿到 undefined（这是崩溃根因）。
+ */
+export function resolveAnnotationColor(tag: unknown): {
+  dot: string; bg: string; border: string; label: string;
+} {
+  return isAnnotationTag(tag) ? ANNOTATION_COLORS[tag] : UNKNOWN_ANNOTATION_COLOR;
+}
 
 export type Annotation = {
   id: string;
@@ -282,6 +327,8 @@ export type Annotation = {
   linkedNode: string;
   createdAt: string;
   handled: boolean;
+  /** Stabilization 1A: 最后更新时间（编辑批注时写入） */
+  updatedAt?: string;
 };
 
 export type AgentStep = {
@@ -504,4 +551,50 @@ export type ChatLearningEvent = {
     delta: number;
   }[];
   suggestedActions: string[];
+};
+
+// ════════════════════════════════════════════════════════════
+// Sprint 2A: KnowledgeState（知识点状态投影）
+// ════════════════════════════════════════════════════════════
+
+/**
+ * 知识点状态投影（Sprint 2A 新增）
+ *
+ * 由 LearningEvent 纯函数重放推导。可完全重建：
+ *   删除全部 KnowledgeState → Replay 全部 LearningEvent → 结果一致。
+ *
+ * 约束：
+ *   - 只保存投影（Projection），不保存事实（Fact）——事实来自事件流
+ *   - 所有字段必须能从事件推导，不依赖隐藏状态
+ *   - 业务规则统一在 memory-rules.ts，projectKnowledgeState 不内联业务逻辑
+ *   - 未来 Agent 可直接消费本结构（mastery / confidence / risk / derivedBy）
+ */
+export type KnowledgeState = {
+  nodeId: string;                    // 对应 KnowledgeNode.id
+  subjectId: string;
+  /** 当前掌握度（投影，0-100） */
+  masteryScore: number;
+  /** 掌握层级（投影，0-4） */
+  masteryLevel: number;
+  /** 累计错题次数（投影，来自 study_completed / question_answered） */
+  mistakes: number;
+  /** 累计复习次数（投影，来自 card_reviewed） */
+  reviewCount: number;
+  /** 当前复习风险（投影：正常/需要关注/进度落后/高风险） */
+  reviewRisk: Risk;
+  /** 遗忘风险（投影，0-100） */
+  forgetRisk: number;
+  /** 上次复习时间（投影，来自最近一次 card_reviewed 的 occurredAt） */
+  lastReviewedAt: string | null;
+  /** 最近一次复习结果（投影：不会/模糊/认识/熟练/稳定） */
+  lastCardMastery: GrowthCard["mastery"] | null;
+  /** 最近一次做题结果（投影：正确/错误） */
+  lastQuestionResult: "正确" | "错误" | null;
+  /** 触达本节点的事件数（投影，可重建）。0 = 未观测节点（仅初始锚点） */
+  eventCount: number;
+  /** 投影元数据 */
+  sourceEventId: string | null;      // 最近一次影响本状态的事件 id
+  projectedAt: string;               // 投影计算时间（取最后事件 occurredAt，保证确定性）
+  /** 推导来源：生成本状态的规则/组件名，供 Agent 决策与调试 */
+  derivedBy: string;
 };

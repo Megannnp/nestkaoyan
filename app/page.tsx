@@ -123,6 +123,7 @@ export default function Home() {
   const activeCard = cards[cardIndex] || cards[0];
   const activeResource = resources.find((r) => r.id === activeResourceId) || resources[0];
   const activeTask = tasks.find((task) => task.id === activeTaskId);
+  const currentSubject = subjects.find((subject) => subject.name === activeKnowledgeSubject) ?? subjects[0];
 
   // ─── Dashboard: Timer state & refs ───
   const [timerStartTime, setTimerStartTime] = useState("");
@@ -394,6 +395,70 @@ export default function Home() {
     addLog(input, `生成 ${nextTasks.length} 个任务，优先 ${highRiskNode.core} / ${highRiskNode.knowledge}`);
   }
 
+  function runAgentWorkflow(input: string) {
+    const steps: AgentStep[] = ["分析真题", "更新知识图谱", "更新掌握度", "重排本周计划", "生成学习笔记"].map((title) => ({ id: makeId("a"), title, status: "完成" }));
+    const core = nodes[0]?.core ?? "热力学";
+    const knowledge = nodes[0]?.knowledge ?? "熵变计算";
+    setAgentSteps(steps);
+    setPending((items) => [{ id: makeId("p"), kind: "图谱更新", title: "近三套真题分析结果", subject: currentSubject?.name ?? "未分科", detail: `建议提高 ${core} / ${knowledge} 的复习优先级`, status: "待确认" }, ...items]);
+    setNotes((items) => [{ id: makeId("n"), title: "真题分析学习笔记", body: `近三套真题集中指向 ${core} / ${knowledge}。先补适用条件，再做综合题。`, tags: ["Agent", "真题分析", core] }, ...items]);
+    generatePlan(input);
+  }
+
+  function runPrompt(prompt = chatInput) {
+    const text = prompt.trim();
+    if (!text) return;
+    setChat((items) => [...items, { role: "user", text }]);
+    setChatInput("");
+    if (text.includes("今天") || text.includes("学什么")) {
+      generatePlan("AI 指令：今天学什么");
+      pushAssistant("已按今日风险知识点重新安排计划。");
+      return;
+    }
+    if (text.includes("分析") && text.includes("真题") && (text.includes("更新") || text.includes("重排"))) {
+      runAgentWorkflow(text);
+      return;
+    }
+    if (text.includes("化学势") || (text.includes("真题") && text.includes("找"))) {
+      pushAssistant("这个请求需要调用真题数据库筛选，真题库将在 Knowledge Center 恢复后接通。");
+      return;
+    }
+    if (text.includes("傅献彩") || text.includes("哪里讲")) {
+      const resource = resources.find((item) => item.name.includes("傅献彩"));
+      if (resource) {
+        setActiveResourceId(resource.id);
+        setReaderPage("132");
+        setActiveView("knowledge");
+        pushAssistant("傅献彩《物理化学》第六版 P132-140 已关联到 热力学 / 熵与熵变 / 熵变计算。");
+      } else {
+        pushAssistant("未找到傅献彩相关资源。");
+      }
+      return;
+    }
+    if (text.includes("错") || text.includes("不会")) {
+      pushAssistant("近几次错误集中在适用条件判断。规则引擎建议延长 Layer 2，不进入 Layer 4。");
+      return;
+    }
+    if (text.includes("笔记") || text.includes("总结")) {
+      setNotes((items) => [{ id: makeId("n"), title: "AI 生成笔记", body: "今日重点：先判断过程类型，再选择熵变公式。", tags: ["AI笔记", "热力学"] }, ...items]);
+      pushAssistant("已生成成长笔记。");
+      return;
+    }
+    if (text.includes("复习")) {
+      pushAssistant("这个请求需要调用成长卡片复习队列，卡片首页将在 Growth Cards 恢复后接通。");
+      return;
+    }
+    if (text.includes("卡片") || text.includes("填空卡") || text.includes("公式卡")) {
+      pushAssistant("这个请求需要调用成长卡片系统，卡片首页将在 Growth Cards 恢复后接通。");
+      return;
+    }
+    if (text.includes("第几轮")) {
+      pushAssistant(`当前主要科目处于 ${currentSubject?.round ?? "第一轮"}，${currentSubject?.layer ?? "Layer 1"}。`);
+      return;
+    }
+    pushAssistant("已收到。可以继续让我安排任务、检索真题、生成笔记或调整图谱。");
+  }
+
   function pushAssistant(text: string) {
     setChat((items) => [...items, { role: "assistant", text }]);
     setNotice(text);
@@ -453,12 +518,7 @@ export default function Home() {
               <div className="section-label">AI Workspace</div>
               <h1>AI 学习助手</h1>
               <div className="quick-prompts">
-                {["今天学什么", "我现在属于第几轮"].map((prompt) => (
-                  <button key={prompt} onClick={() => {
-                    if (prompt === "今天学什么") generatePlan();
-                    else pushAssistant(`当前主要科目处于 ${subjects[0]?.round ?? "第一轮"}，${subjects[0]?.layer ?? "Layer 1"}。`);
-                  }}>{prompt}</button>
-                ))}
+                {quickPrompts.map((prompt) => <button key={prompt} onClick={() => runPrompt(prompt)}>{prompt}</button>)}
               </div>
               {agentSteps.length > 0 && (
                 <div className="agent-run">
@@ -476,7 +536,6 @@ export default function Home() {
                   <div className={`bubble ${message.role}`} key={`${message.text}-${index}`}>{message.text}</div>
                 ))}
               </div>
-              {/* 其余 quick prompts 依赖 Agent 运行时，Phase 2 恢复 */}
             </div>
 
             {/* Engine Panel — Tasks */}
@@ -616,6 +675,37 @@ export default function Home() {
                   </article>
                 ))}
               </div>
+            </div>
+          </section>
+        )}
+
+        {/* ─── Agent 独立页面 ─── */}
+        {activeView === "agent" && (
+          <section className="workflow workspace-pane active" id="ai-assistant">
+            <div className="section-heading">
+              <div><div className="section-label">AI Workspace</div><h2>AI 学习助手</h2></div>
+            </div>
+            <div className="quick-prompts">
+              {quickPrompts.map((prompt) => <button key={prompt} onClick={() => runPrompt(prompt)}>{prompt}</button>)}
+            </div>
+            {agentSteps.length > 0 && (
+              <div className="agent-run">
+                {agentSteps.map((step, index) => (
+                  <div key={step.id}>
+                    <span>{index + 1}</span>
+                    <strong>{step.title}</strong>
+                    <b>{step.status}</b>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="chat-window">
+              {chat.slice(-10).map((message, index) => <div className={`bubble ${message.role}`} key={`${message.text}-${index}`}>{message.text}</div>)}
+              <form className="prompt-bar" onSubmit={(event) => { event.preventDefault(); runPrompt(); }}>
+                <span>输入</span>
+                <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="例如：今天还有两个小时，重新安排计划" />
+                <button>发送</button>
+              </form>
             </div>
           </section>
         )}

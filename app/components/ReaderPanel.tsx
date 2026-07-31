@@ -152,7 +152,7 @@ export function ReaderPanel({
         acc[ann.tag].push(ann);
         return acc;
       },
-      { "重点": [], "疑问": [], "易错": [], "总结": [] }
+      { "重点": [], "疑问": [], "易错": [], "总结": [], "核心概念": [] }
     ),
     [subjectAnnotations]
   );
@@ -413,7 +413,7 @@ export function ReaderPanel({
               ))}
             </div>
 
-            {(["重点", "易错", "疑问", "总结"] as AnnotationTag[]).map((tag) => {
+            {(["重点", "易错", "疑问", "总结", "核心概念"] as AnnotationTag[]).map((tag) => {
               const items = annotationsByTag[tag];
               if (!items.length) return null;
               const color = ANNOTATION_COLORS[tag];

@@ -258,7 +258,9 @@ export type AnnotationTag =
   /** 🔴 容易混淆、容易用错、容易漏条件 */
   | "易错"
   /** 🟢 自己的理解、归纳和记忆方法 */
-  | "总结";
+  | "总结"
+  /** ⚪ 旧版默认标签（兼容历史数据，避免 ANNOTATION_COLORS[tag] 为 undefined） */
+  | "核心概念";
 
 /** 批注颜色映射 */
 export const ANNOTATION_COLORS: Record<AnnotationTag, { dot: string; bg: string; border: string; label: string }> = {
@@ -266,6 +268,7 @@ export const ANNOTATION_COLORS: Record<AnnotationTag, { dot: string; bg: string;
   "疑问": { dot: "🔵", bg: "#DBEAFE", border: "#3B82F6", label: "暂时没理解、需要继续追问" },
   "易错": { dot: "🔴", bg: "#FEE2E2", border: "#EF4444", label: "容易混淆、容易用错、容易漏条件" },
   "总结": { dot: "🟢", bg: "#DCFCE7", border: "#22C55E", label: "自己的理解、归纳和记忆方法" },
+  "核心概念": { dot: "⚪", bg: "#F4F4F5", border: "#A1A1AA", label: "核心概念、定义" },
 };
 
 export type Annotation = {

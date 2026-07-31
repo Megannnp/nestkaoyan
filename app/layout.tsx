@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "katex/dist/katex.min.css";
+import { ErrorBoundary } from "./lib/error-boundary";
 
 export const metadata: Metadata = {
   title: "筑巢考研工作台",
@@ -18,7 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body><ErrorBoundary>{children}</ErrorBoundary></body>
     </html>
   );
 }

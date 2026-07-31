@@ -160,6 +160,8 @@ export type Task = {
   completedAt: string;
   relatedCardIds: string[];
   relatedQuestionIds: string[];
+  /** 该任务已计入学习热力图的日期（YYYY-MM-DD），用于防止重复累计；未计入为 undefined/"" */
+  countedForDate?: string;
 };
 
 export type PendingItem = {

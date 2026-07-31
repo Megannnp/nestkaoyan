@@ -30,6 +30,12 @@ import type { GrowthCard } from "./types.ts";
 export const LEARNING_EVENT_VERSION = 1;
 /** 存储 schema 版本 */
 export const EVENT_SCHEMA_VERSION = 1;
+/**
+ * 事件流保留上限（防止 localStorage 无界增长触发 QuotaExceededError）。
+ * 采集是纯副作用、只用于投影，保留最近 N 条足以覆盖近期投影窗口；
+ * 超出后从头部丢弃最旧事件。
+ */
+export const MAX_LEARNING_EVENTS = 2000;
 
 // ════════════════════════════════════════════════════════════
 // 类型定义
@@ -169,7 +175,11 @@ export function appendLearningEvent(
   } catch {
     // 解析失败视为无存储，继续写入
   }
-  const next = [...events.map(normalizeEvent), createLearningEvent(input)];
+  const appended = [...events.map(normalizeEvent), createLearningEvent(input)];
+  // 保留最近 MAX_LEARNING_EVENTS 条，超出丢弃最旧的（头部）
+  const next = appended.length > MAX_LEARNING_EVENTS
+    ? appended.slice(appended.length - MAX_LEARNING_EVENTS)
+    : appended;
   persistEngineData({
     eventSchemaVersion: EVENT_SCHEMA_VERSION,
     learningEvents: next,

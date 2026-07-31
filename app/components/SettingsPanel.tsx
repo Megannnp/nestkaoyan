@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useMemo } from "react";
 import type { ExamGoal, Subject } from "../lib/types";
-import { seedExam } from "../lib/default-data";
 import styles from "../../styles/components.module.css";
 
 interface SettingsPanelProps {
@@ -526,7 +525,7 @@ export function SettingsPanel({
             border: "1px dashed #D4D4D8",
             borderRadius: "8px",
           }}>
-            暂无考试科目，点击"+ 添加科目"开始添加
+            暂无考试科目，点击“+ 添加科目”开始添加
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>

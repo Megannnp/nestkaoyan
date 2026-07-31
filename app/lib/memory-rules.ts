@@ -250,7 +250,7 @@ export function classifyMemory(input: string): MatchResult {
  */
 export function extractMemories(
   input: string,
-  sourceId: string
+  _sourceId: string
 ): {
   longTerm: string[];
   shortTerm: string[];

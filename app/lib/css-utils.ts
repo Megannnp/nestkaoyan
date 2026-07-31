@@ -47,7 +47,7 @@ export const s = {
   gridBtnActive: { height: '82px', border: '1px solid #E4E4E7', boxShadow: '0 2px 6px rgba(0, 0, 0, 0.06)' },
   gridBtnInactive: { height: '82px', border: '1px solid #E4E4E7', boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.05)' },
   gridIcon: { fontSize: 20, lineHeight: 1 as const },
-  gridLabel: (active: boolean) => ({ fontSize: 14, fontWeight: 500, lineHeight: 1.2 as const, marginTop: 8, color: '#18181B' }),
+  gridLabel: (_active: boolean) => ({ fontSize: 14, fontWeight: 500, lineHeight: 1.2 as const, marginTop: 8, color: '#18181B' }),
 
   // === 设置导航按钮 ===
   navIcon: { fontSize: 14, lineHeight: 1 as const },

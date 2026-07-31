@@ -1,7 +1,7 @@
 "use client";
 
 import { s } from "../lib/css-utils";
-import type { WorkspaceView, ExamGoal, StudyDay, GrowthCard, CardDeck } from "../lib/types";
+import type { WorkspaceView, ExamGoal } from "../lib/types";
 
 interface SidebarProps {
   daysLeft: number;
@@ -95,7 +95,7 @@ export function Sidebar({
                     const isFuture = day.date > todayStr;
                     const isToday = day.date === todayStr;
                     const isExam = day.date === examDate;
-                    let level = isFuture ? 0 : (day.completed >= 4 ? 4 : day.completed >= 3 ? 3 : day.completed >= 2 ? 2 : day.completed >= 1 ? 1 : 0);
+                    const level = isFuture ? 0 : (day.completed >= 4 ? 4 : day.completed >= 3 ? 3 : day.completed >= 2 ? 2 : day.completed >= 1 ? 1 : 0);
                     let color = 'bg-[#F1F1F3]';
                     if (!isFuture && level === 1) color = 'bg-[#D4D4D8]';
                     else if (!isFuture && level === 2) color = 'bg-[#A1A1AA]';

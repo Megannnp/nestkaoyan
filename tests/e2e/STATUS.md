@@ -1,14 +1,14 @@
 # Playwright E2E Test Status
 
-> 状态：INFRASTRUCTURE + DRAFT（未验证通过）
+> 状态：**PASS（52/52 全量通过，2026-08-01 16:32）**
 
 ## 当前状态
-- 基础设施与草稿测试已提交，但 **未声明 E2E 通过**
-- 3 条草稿测试：Dashboard 学习闭环 / Knowledge 上传->Reader / Cards 创建->评分
-- **Chromium revision 1234 因网络问题未安装**（本机仅有 1228），3 条测试尚未实际执行验证
-- 首跑预期需按真实 DOM 修正选择器（getByRole/getByLabel 优先）
+- **全量 E2E 回归 52/52 PASS（2026-08-01 16:32）**，零 Runtime/Network/React 错误
+- 覆盖模块：dashboard / knowledge / reader / questions / cards / review / flows
+- `helpers.ts` 的 `freshState()` 已通过 `page.addInitScript` 注入 `onboardingCompleted=true`，根治 Onboarding 全屏向导拦截
+- 已同步过时选择器（Cards 学科 Tab/返回按钮/新建卡片组；Agent `chat-input`/「新建会话」/「历史会话」等）
 
-## 运行要求
+## 运行要求（默认回归：`npx playwright test --workers=2`）
 1. 网络可用时执行 `npm install -D @playwright/test`（已在 package.json）
 2. 下载浏览器：`npx playwright install chromium`（需 revision 1234）
 3. 运行：`npm run test:e2e`

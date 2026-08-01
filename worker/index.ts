@@ -1,10 +1,13 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { handleAnalyzeExam } from "./analyze-exam";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
+  /** DeepSeek 真题分析密钥（服务端 secret / 本地 .dev.vars；绝不下发前端） */
+  DEEPSEEK_API_KEY?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -28,6 +31,11 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // 真题分析 API（首个真 AI 意图）——key 只在服务端使用
+    if (url.pathname === "/api/analyze-exam" && request.method === "POST") {
+      return handleAnalyzeExam(request, env);
+    }
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];

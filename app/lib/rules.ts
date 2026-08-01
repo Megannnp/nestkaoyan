@@ -95,10 +95,15 @@ export const PROGRESS_WEIGHT = {
 export const TOAST_DURATION = 3000;
 
 // ============================================================
-// localStorage 相关
+// localStorage 相关（Stabilization 1C-1: 单一 v5 workspace key）
 // ============================================================
 export const STORAGE = {
-  key: "nest-exam-workspace-v3",
+  /** 当前 workspace 唯一 key（v5 新契约，内部携带 storageVersion=5） */
+  key: "nest-exam-workspace-v5",
+  /** 旧 v3 业务数据 key（迁移源，保留可回滚） */
+  legacyKeyV3: "nest-exam-workspace-v3",
+  /** 旧 v4 数据 key（迁移源，保留可回滚） */
+  legacyKeyV4: "nest-exam-workspace-v4",
   /** 最多保留的 studyDays 记录数 */
   maxStudyDays: 140,
 } as const;

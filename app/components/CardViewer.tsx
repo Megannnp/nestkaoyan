@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import type { GrowthCard } from "../lib/types";
 
 interface CardViewerProps {
@@ -66,9 +67,9 @@ export function CardViewer({
         <button className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={() => onMove(-1)} disabled={cardIndex === 0}>上一张</button>
         <button className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={onFlip}>{cardFlipped ? "看正面" : "翻面"}</button>
         <button className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={() => onMove(1)} disabled={cardIndex >= cardQueue.length - 1}>下一张</button>
-        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#16A34A] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "认识")}>认识 [1]</button>
-        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#F59E0B] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "模糊")}>模糊 [2]</button>
-        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#EF4444] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "不会")}>不会 [3]</button>
+        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#4CAF74] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "认识")}>认识 [1]</button>
+        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#C89B4A] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "模糊")}>模糊 [2]</button>
+        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#B5655D] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "不会")}>不会 [3]</button>
         <button className="min-h-[32px] px-3 rounded-[8px] bg-[#18181B] text-white font-bold text-[13px]" onClick={onFocusMode}>专注学习</button>
         <details className="more-menu">
           <summary className="text-[12px]">更多</summary>
@@ -91,7 +92,21 @@ interface FocusModeProps {
 }
 
 export function FocusMode({ activeCard, cardFlipped, onFlip, onReview, onClose }: FocusModeProps) {
+  // Escape 关闭专注模式（与 CardViewer 快捷键体系一致；FocusMode 自身不拦截 1/2/3/空格）
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
+    // 遮罩点击仅关闭「专注模式」容器内的内部点击不会意外退出：
+    // focus-card 内 stopPropagation；focus-card 容器外点遮罩才退出（用户需明确点击外部区域）
     <div className="focus-overlay" onClick={onClose}>
       <div className="focus-card" onClick={(e) => e.stopPropagation()}>
         <div className={`flip-container ${cardFlipped ? "flipped" : ""}`} onClick={onFlip} style={{ minHeight: '340px' }}>
@@ -107,9 +122,9 @@ export function FocusMode({ activeCard, cardFlipped, onFlip, onReview, onClose }
           </div>
         </div>
         <div className="flex justify-center gap-3 mt-4">
-          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#16A34A] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "认识"); onClose(); }}>认识 [1]</button>
-          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#F59E0B] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "模糊"); onClose(); }}>模糊 [2]</button>
-          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#EF4444] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "不会"); onClose(); }}>不会 [3]</button>
+          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#4CAF74] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "认识"); onClose(); }}>认识 [1]</button>
+          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#C89B4A] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "模糊"); onClose(); }}>模糊 [2]</button>
+          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#B5655D] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "不会"); onClose(); }}>不会 [3]</button>
           <button className="min-h-[36px] px-4 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={onClose}>退出</button>
         </div>
       </div>

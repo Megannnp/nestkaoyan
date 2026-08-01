@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import type { ExamGoal, Subject } from "../lib/types";
+import { NEW_SUBJECT_TEMPLATE, getDefaultMaxScore } from "../lib/subject-utils";
 import styles from "../../styles/components.module.css";
 
 interface SettingsPanelProps {
@@ -11,39 +12,6 @@ interface SettingsPanelProps {
   onAddSubject: (subject: Subject) => void;
   onUpdateSubject: (id: string, patch: Partial<Subject>) => void;
   onRemoveSubject: (id: string) => void;
-}
-
-/** 默认科目满分映射 */
-const DEFAULT_MAX_SCORE: Record<string, string> = {
-  "公共课": "100",
-  "专业课": "150",
-};
-
-function makeSubjectId(): string {
-  return `s-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
-}
-
-const NEW_SUBJECT_TEMPLATE = (): Subject => ({
-  id: makeSubjectId(),
-  name: "",
-  type: "公共课",
-  maxScore: "100",
-  targetScore: "70",
-  currentProgress: "",
-  currentMastery: "有些模糊",
-  weeklyHours: "4",
-  hasPastPapers: false,
-  hasSolutions: false,
-  hasReferences: false,
-  round: "第一轮",
-  layer: "Layer 1",
-  focus: "",
-  risk: "正常",
-});
-
-/** 科目名称 → 推荐的满分 */
-function getDefaultMaxScore(type: string): string {
-  return DEFAULT_MAX_SCORE[type] || "100";
 }
 
 export function SettingsPanel({

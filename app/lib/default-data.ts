@@ -1,4 +1,4 @@
-import type { ExamGoal, Subject, Task, StudyDay, GrowthCard, CardDeck, Resource, Question, KnowledgeNode, Note, Annotation, AppSettings } from "./types";
+import type { ExamGoal, Subject, Task, StudyDay, GrowthCard, CardDeck, CardCategory, Resource, Question, KnowledgeNode, Note, Annotation, AppSettings } from "./types";
 
 // Static seed data - use FIXED dates to avoid hydration mismatch between server and client
 // These are placeholder dates for initial seed data only.
@@ -32,7 +32,7 @@ export const seedSubjects: Subject[] = [
     hasSolutions: true,
     hasReferences: true,
     round: "第一轮",
-    layer: "Layer 1",
+    layer: "第 1 层",
     focus: "马原",
     risk: "正常",
   },
@@ -49,7 +49,7 @@ export const seedSubjects: Subject[] = [
     hasSolutions: true,
     hasReferences: true,
     round: "第一轮",
-    layer: "Layer 1",
+    layer: "第 1 层",
     focus: "长难句",
     risk: "正常",
   },
@@ -66,7 +66,7 @@ export const seedSubjects: Subject[] = [
     hasSolutions: false,
     hasReferences: true,
     round: "第一轮",
-    layer: "Layer 1",
+    layer: "第 1 层",
     focus: "积分概念串联",
     risk: "需要关注",
   },
@@ -83,7 +83,7 @@ export const seedSubjects: Subject[] = [
     hasSolutions: true,
     hasReferences: true,
     round: "第一轮",
-    layer: "Layer 2",
+    layer: "第 2 层",
     focus: "熵变计算",
     risk: "高风险",
   },
@@ -101,7 +101,7 @@ export const seedResources: Resource[] = [
     status: "已索引",
     fileName: "physical-chemistry.pdf",
     recommendedRound: "第一轮",
-    recommendedLayer: "Layer 1-2",
+    recommendedLayer: "第 1-2 层",
     currentPage: "132",
     lastRead: "今天",
     readingMinutes: "45",
@@ -118,7 +118,7 @@ export const seedResources: Resource[] = [
     status: "已索引",
     fileName: "hit-828-papers.pdf",
     recommendedRound: "第一轮",
-    recommendedLayer: "Layer 2-4",
+    recommendedLayer: "第 2-4 层",
     currentPage: "2025",
     lastRead: "昨天",
     readingMinutes: "30",
@@ -138,12 +138,12 @@ export const seedQuestions: Question[] = [
     stem: "判断不同过程下熵变计算公式的适用条件。",
     answer: "先判断过程是否可逆、是否等温，再选择对应公式。",
     originalAnalysis: "原解析强调可逆过程定义。",
-    aiAnalysis: "该题考查 Layer 2 的公式条件辨析，不宜直接作为综合题训练。",
+    aiAnalysis: "该题考查第 2 层的公式条件辨析，不宜直接作为综合题训练。",
     difficulty: "3",
     core: "热力学",
     branch: "熵与熵变",
     knowledge: "熵变计算",
-    layer: "Layer 2",
+    layer: "第 2 层",
     done: true,
     result: "错误",
     errorReason: "没有先判断过程类型",
@@ -163,12 +163,12 @@ export const seedQuestions: Question[] = [
     stem: "相律和自由度判断。",
     answer: "按相数、组分数和约束条件判断。",
     originalAnalysis: "原解析给出公式 F=C-P+2。",
-    aiAnalysis: "适合放入相平衡 Layer 3 基础题。",
+    aiAnalysis: "适合放入相平衡第 3 层基础题。",
     difficulty: "2",
     core: "相平衡",
     branch: "相律",
     knowledge: "自由度判断",
-    layer: "Layer 3",
+    layer: "第 3 层",
     done: false,
     result: "未做",
     errorReason: "",
@@ -193,7 +193,7 @@ export const seedNodes: KnowledgeNode[] = [
     masteryScore: 42,
     confidence: "中",
     round: "第一轮",
-    layer: "Layer 2",
+    layer: "第 2 层",
     mistakes: 8,
     reviewRisk: "高风险",
     isMonthlyFocus: true,
@@ -211,7 +211,7 @@ export const seedNodes: KnowledgeNode[] = [
     masteryScore: 48,
     confidence: "低",
     round: "第一轮",
-    layer: "Layer 2",
+    layer: "第 2 层",
     mistakes: 2,
     reviewRisk: "需要关注",
     isMonthlyFocus: false,
@@ -226,7 +226,7 @@ export const seedTasks: Task[] = [
     core: "热力学",
     branch: "熵与熵变",
     round: "第一轮",
-    layer: "Layer 2",
+    layer: "第 2 层",
     source: "傅献彩《物理化学》第六版",
     range: "P132-140",
     minutes: 70,
@@ -244,7 +244,7 @@ export const seedTasks: Task[] = [
     status: "待开始",
     aiRecommended: true,
     aiReasonForgetRate: "遗忘概率 82%",
-    aiReasonLayerStable: "Layer 2 尚未稳定",
+    aiReasonLayerStable: "第 2 层尚未稳定",
     aiReasonMistakeCount: "最近连续错题 8 次",
     aiReasonExamFrequency: "属于高频真题考点",
     estimatedCompletionMinutes: 60,
@@ -262,7 +262,7 @@ export const seedTasks: Task[] = [
     core: "热力学",
     branch: "熵与熵变",
     round: "第一轮",
-    layer: "Layer 2",
+    layer: "第 2 层",
     source: "2021、2023、2025 相似真题",
     range: "已确认题 3 道",
     minutes: 55,
@@ -297,7 +297,7 @@ export const seedNotes: Note[] = [
     id: "n-1",
     title: "熵变计算：适用条件",
     body: "错因不是公式不会背，而是没有先判断过程类型。先写条件，再代公式。",
-    tags: ["热力学", "Layer 2", "错因"],
+    tags: ["热力学", "第 2 层", "错因"],
   },
 ];
 
@@ -309,6 +309,21 @@ export const seedDecks: CardDeck[] = [
   { id: "deck-exam-high-freq", subject: "828 物理化学", name: "真题高频", cardIds: [] },
   { id: "deck-math", subject: "数学二", name: "积分", cardIds: [] },
   { id: "deck-english", subject: "英语一", name: "单词与长难句", cardIds: [] },
+];
+
+/**
+ * UX Sprint: 卡片自定义分类 seed（学科 ≠ 分类）。
+ * 每个学科拥有独立的分类列表，绑定 subjectId，不跨学科共享。
+ */
+export const seedCardCategories: CardCategory[] = [
+  { id: "cat-828-thermo", subjectId: "s-828", name: "热力学公式", createdAt: SEED_TODAY, updatedAt: SEED_TODAY },
+  { id: "cat-828-errors", subjectId: "s-828", name: "易错概念", createdAt: SEED_TODAY, updatedAt: SEED_TODAY },
+  { id: "cat-828-questions", subjectId: "s-828", name: "真题错题", createdAt: SEED_TODAY, updatedAt: SEED_TODAY },
+  { id: "cat-828-highfreq", subjectId: "s-828", name: "高频考点", createdAt: SEED_TODAY, updatedAt: SEED_TODAY },
+  { id: "cat-math-limit", subjectId: "s-math", name: "极限", createdAt: SEED_TODAY, updatedAt: SEED_TODAY },
+  { id: "cat-math-deriv", subjectId: "s-math", name: "导数", createdAt: SEED_TODAY, updatedAt: SEED_TODAY },
+  { id: "cat-math-integ", subjectId: "s-math", name: "积分", createdAt: SEED_TODAY, updatedAt: SEED_TODAY },
+  { id: "cat-math-linear", subjectId: "s-math", name: "线性代数", createdAt: SEED_TODAY, updatedAt: SEED_TODAY },
 ];
 
 export const seedCards: GrowthCard[] = [

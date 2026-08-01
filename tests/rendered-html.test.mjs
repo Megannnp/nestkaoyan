@@ -40,7 +40,7 @@ test("server-renders the kaoyan learning agent workspace", async () => {
   assert.match(html, /成长卡片/);
   assert.match(html, /设置/);
   assert.match(html, /学习记录/);
-  assert.match(html, /Layer 2/);
+  assert.match(html, /第 2 层/);
   assert.match(html, /第一轮/);
   assert.match(html, /掌握度/);
   assert.match(html, /开始学习/);
@@ -97,14 +97,16 @@ test("knowledge/agent/cards/settings page code exists in page.tsx", async () => 
   assert.match(page, /activeView === "agent"/);
   assert.match(page, /runAgentWorkflow/);
   assert.match(page, /runPrompt/);
-  assert.match(page, /prompt-bar/);
+  // UX Sprint 重构后类名为 quick-prompts（原 prompt-bar 已废弃）
+  assert.match(page, /quick-prompts/);
 
   // Cards
   assert.match(page, /activeView === "cards"/);
   assert.match(page, /subjectCards/);
   assert.match(page, /dueCards/);
   assert.match(page, /cardQueue/);
-  assert.match(page, /quickCardFront/);
+  // UX Sprint 后快速创建改为弹窗（editingCardId / editingCard 控制）；quickCardFront 已废弃
+  assert.match(page, /editingCardId/);
   assert.match(page, /createCardFromText/);
   assert.match(page, /reviewCard/);
   assert.match(page, /moveCard/);

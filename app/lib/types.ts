@@ -47,11 +47,43 @@ export type Subject = {
   risk: Risk;
 };
 
+/**
+ * 结构化资料种类（供后续 AI 按类型差异化处理）。
+ * 注意：不替换现有中文 `Resource.type` 自由字符串（历史数据 + JSX 直接读取），
+ * 而是作为新增可选字段并存。
+ */
+export type ResourceType =
+  | "past_exam"    // 历年真题
+  | "textbook"     // 教材
+  | "exercise_book" // 辅导书 / 习题册
+  | "notes"        // 自己的笔记
+  | "other";       // 其他
+
+/** ResourceType → 中文展示标签 */
+export const RESOURCE_KIND_LABEL: Record<ResourceType, string> = {
+  past_exam: "真题",
+  textbook: "教材",
+  exercise_book: "辅导书",
+  notes: "笔记",
+  other: "其他",
+};
+
+/** ResourceType → 兼容旧版 `Resource.type` 中文值（Reader/图标等仍读取该字段） */
+export const RESOURCE_KIND_TO_LEGACY_TYPE: Record<ResourceType, string> = {
+  past_exam: "真题",
+  textbook: "教材",
+  exercise_book: "辅导书",
+  notes: "笔记",
+  other: "学习资料",
+};
+
 export type Resource = {
   id: string;
   name: string;
   subject: string;
   type: string;
+  /** 结构化资料种类（新用户导入时写入；旧数据可能为 undefined） */
+  resourceKind?: ResourceType;
   author: string;
   version: string;
   pages: string;
@@ -182,6 +214,32 @@ export type Review = {
   priority: string;
 };
 
+/**
+ * UX Sprint: 学习结束流程草稿
+ *
+ * 用户在学习结束弹窗（记录学习结果）中填写的内容自动保存在此处，
+ * 关闭/刷新/切换页面均不丢失；再次进入同一任务时自动恢复计时与表单值。
+ * 只有点击「保存并完成」后才真正生成学习记录并清空草稿。
+ */
+export type StudyDraft = {
+  /** 关联的任务 id（草稿只属于一个进行中的任务） */
+  taskId: string;
+  /** 已累计学习秒数（再次进入时续接计时） */
+  elapsedSeconds: number;
+  /** 用户手动编辑过的实际学习分钟数（可选编辑） */
+  customMinutes: string;
+  /** 掌握程度 */
+  mastery: MasteryText;
+  /** 正确率 */
+  accuracy: string;
+  /** 学习状态 */
+  mood: StudyMood;
+  /** 困难/错因 */
+  note: string;
+  /** 是否存在未确认的修改（决定关闭弹窗是否需要确认提示） */
+  dirty: boolean;
+};
+
 export type Note = {
   id: string;
   title: string;
@@ -261,6 +319,26 @@ export type GrowthCard = {
   mastery: "不会" | "模糊" | "认识" | "熟练" | "稳定";
   note: string;
   favorite: boolean;
+  /**
+   * UX Sprint: 自定义分类 id（学科下的分类，非学科本身）。
+   * 未选择分类时为空 → 进入「未分类」（不跨学科）。
+   */
+  categoryId?: string;
+};
+
+/**
+ * UX Sprint: 卡片自定义分类
+ *
+ * 分类是用户在学科下自行创建、用于整理卡片的容器。
+ * 学科 ≠ 分类：学科是系统一级隔离维度（绑定 subjectId），分类是学科内的二级整理。
+ * 不同学科的分类独立管理，不能互相显示。
+ */
+export type CardCategory = {
+  id: string;
+  subjectId: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 /** 批注合法标签的显式集合（唯一权威来源；新增/删除标签必须改这里） */
@@ -337,6 +415,42 @@ export type AgentStep = {
   id: string;
   title: string;
   status: "等待" | "完成";
+};
+
+/**
+ * UX Sprint: AI 助手消息
+ *
+ * 每条消息都记录真实的 createdAt（持久化，刷新后保留原始发送时间），
+ * 不在界面渲染时临时生成时间。用户消息、AI 回复和系统操作反馈均显示发送时间。
+ */
+export type AgentMessage = {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  /** 原始发送时间（ISO 8601，持久化不改） */
+  createdAt: string;
+  /** 更新时间（后续编辑/重试/重新生成时写入） */
+  updatedAt?: string;
+  /** 消息类型：用户聊天 / AI 建议 / 系统操作 / 数据记录 */
+  messageType?: "chat" | "action" | "record";
+};
+
+/**
+ * UX Sprint: AI 助手对话 Session
+ *
+ * 聊天按 Session 管理（如「今天学习规划」「真题分析」「英语作文」各自独立）。
+ * 新建对话创建新的 Session，不删除历史。
+ */
+export type ChatSession = {
+  id: string;
+  /** 会话标题（自动取首条用户消息或「新对话」） */
+  title: string;
+  /** 创建时间（ISO 8601） */
+  createdAt: string;
+  /** 该会话的消息列表 */
+  messages: AgentMessage[];
+  /** 会话状态（可选，向后兼容历史数据）：🟢 正在学习 / ⚪ 已完成 / 🟡 暂停 */
+  status?: "active" | "completed" | "paused";
 };
 
 // ════════════════════════════════════════════════════════════

@@ -12,8 +12,9 @@
 .mainContent {
   margin-left: 288px;
   min-height: 100vh;
-  padding: 32px 40px;
-  max-width: 1000px;
+  /* UX Sprint: 主内容上下留白收窄（32px → 24px），与 Sidebar 视觉密度对齐。
+     移除 max-width 固定宽度，让内容区铺满剩余空间，左右留白保持对称（padding 32px）。 */
+  padding: 24px 32px;
 }
 
 /* ════════════════════════════════════════════
@@ -23,7 +24,8 @@
 .workspacePane {
   background: white;
   border-radius: 12px;
-  padding: 24px;
+  /* UX Sprint: 内边距收窄到统一 md/lg 体系，减少松散感 */
+  padding: 20px;
   border: 1px solid #E4E4E7;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
@@ -32,7 +34,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  /* UX Sprint: 标题区与功能区之间 16px（统一 Spacing.lg） */
+  margin-bottom: 16px;
 }
 
 .sectionLabel {

@@ -36,10 +36,12 @@ export function Sidebar({
   onCellMouseEnter, onCellMouseLeave, onCellClick,
 }: SidebarProps) {
   return (
-    <aside className="fixed top-0 left-0 h-screen w-[288px] z-10 hidden lg:flex flex-col bg-white/82 backdrop-blur-[18px] border-r border-[#E4E4E7] p-4 overflow-y-auto overflow-x-hidden">
+    <aside className="fixed top-0 left-0 h-screen w-[288px] z-10 hidden lg:flex flex-col bg-white/82 backdrop-blur-[18px] border-r border-[#E4E4E7] px-6 py-4 gap-3 overflow-y-auto overflow-x-hidden">
       {/* Logo + 倒计时 */}
       <div className="flex items-center gap-3 shrink-0">
-        <span className="grid place-items-center w-10 h-10 rounded-lg bg-[#27272A] text-white shrink-0" style={s.logoText}>N</span>
+        {/* 静态 SVG logo，用原生 <img> 即可（next/image 对 SVG 反而需额外配置） */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/favicon.svg" alt="筑巢考研" className="w-10 h-10 shrink-0" />
         <div className="flex-1 min-w-0">
           <div style={s.logoText}>筑巢考研</div>
           <div style={s.logoSub}>Learning Agent</div>
@@ -51,7 +53,7 @@ export function Sidebar({
       </div>
 
       {/* 目标信息 + 进度 */}
-      <div className="border-t border-[#F1F1F3] mt-4 pt-4">
+      <div className="border-t border-[#F1F1F3] mt-3 pt-3">
         <div>
           <div style={s.schoolName} className="line-clamp-2">{exam.school || "未设置院校"}</div>
           <div style={s.majorName}>{exam.major || "未设置专业"}</div>
@@ -68,7 +70,7 @@ export function Sidebar({
       </div>
 
       {/* 热力图 */}
-      <div className="border-t border-[#E4E4E7] mt-4 pt-4 w-full min-w-0 max-w-full">
+      <div className="border-t border-[#E4E4E7] mt-3 pt-3 w-full min-w-0 max-w-full">
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="text-[13px] font-semibold leading-[1.4] text-[#18181B] shrink-0">学习记录</div>
           <div className="text-[11px] leading-[1.4] text-[#71717A] shrink-0 whitespace-nowrap">开始于 {heatmapStartFormatted}</div>
@@ -141,7 +143,7 @@ export function Sidebar({
       </div>
 
       {/* 四宫格 */}
-      <div className="border-t border-[#E4E4E7] mt-4 pt-4">
+      <div className="border-t border-[#E4E4E7] mt-3 pt-3">
         <div className="text-[13px] font-semibold leading-[1.4] text-[#18181B] mb-2">核心工作区</div>
         <div className="grid grid-cols-2 gap-3">
           {[
@@ -165,7 +167,7 @@ export function Sidebar({
       </div>
 
       {/* 设置 */}
-      <nav className="border-t border-[#E4E4E7] mt-4 pt-4">
+      <nav className="border-t border-[#E4E4E7] mt-3 pt-3">
         <button className={`w-full flex items-center h-9 px-3 rounded-[10px] text-left transition-colors ${activeView === "settings" ? 'bg-[#EDEDED] text-[#18181B]' : 'bg-transparent text-[#71717A] hover:text-[#18181B] hover:bg-[#F4F4F5]'}`}
           onClick={() => setActiveView("settings")}>
           <span style={s.navIcon} className="mr-2">⚙️</span>

@@ -26,16 +26,16 @@ import styles from "../styles/workspace.module.css";
 import { Sidebar } from "./components/Sidebar";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { ReviewDialog } from "./components/ReviewDialog";
-import { SettingsPanel } from "./components/SettingsPanel";
 import { OnboardingWizard, type OnboardingResult } from "./components/OnboardingWizard";
 import { WorkspaceProvider, type WorkspaceCtx } from "./components/workspace-context";
 import { CardsView } from "./components/CardsView";
 import { KnowledgeView } from "./components/KnowledgeView";
 import { DashboardTasksView } from "./components/DashboardTasksView";
+import { AgentView } from "./components/AgentView";
+import { SettingsView } from "./components/SettingsView";
 import { analyzeExam, analyzeErrorReason } from "./lib/ai/analyze-exam";
 import { analyzeMistakes, mistakesErrorReason } from "./lib/ai/analyze-mistakes";
 import { generatePlan as generateTodayPlan, planErrorReason } from "./lib/ai/plan-generate";
-import { ChatPanel } from "./components/ChatPanel";
 import { buildMaterialBundle, buildPlaceholderQuestionsForPastPaper, extractQuestionKeyword } from "./lib/materials";
 import { makeId, today, dateOnly, normalizeExamGoal, dateRange } from "./lib/utils";
 
@@ -1774,6 +1774,10 @@ export default function Home() {
     tasks, agentSteps, activeChatMessages, quickPrompts, activeTimerTaskId, timerStartTime,
     updateTask, toggleTaskDone, moveTask, startTask, pauseTimer, resumeTimer, handleEndLearning,
     openTaskDialog, generatePlan, runPrompt,
+    // Agent + Settings
+    chatSessions, activeSessionId, activeSessionIdRef, chatHistoryOpen,
+    newChatSession, setChatSessions, setActiveSessionId, setChatHistoryOpen,
+    exam, appSettings, setExam, setSubjects, setAppSettings, handleExportData, handleImportData,
   };
 
   return (
@@ -1819,40 +1823,7 @@ export default function Home() {
         {activeView === "dashboard" && activeDashboardPanel === "tasks" && <DashboardTasksView />}
 
         {/* ─── Agent 独立页面（Conversation UX v2: 三栏固定布局）─── */}
-        {activeView === "agent" && (
-          <section className="workflow workspace-pane active" id="ai-assistant">
-            <ChatPanel
-              sessions={chatSessions}
-              activeSessionId={activeSessionId || chatSessions[0]?.id || ""}
-              onSelectSession={(id) => { setActiveSessionId(id); activeSessionIdRef.current = id; }}
-              onNewSession={newChatSession}
-              onSend={(content) => runPrompt(content)}
-              onRenameSession={(id, title) => {
-                setChatSessions((items) => items.map((s) => s.id === id ? { ...s, title } : s));
-                setNotice("已重命名会话");
-              }}
-              onDeleteSession={(id) => {
-                const remainingSessions = chatSessions.filter((s) => s.id !== id);
-                setChatSessions(remainingSessions);
-                if (activeSessionIdRef.current === id) {
-                  const next = remainingSessions[0] ?? null;
-                  setActiveSessionId(next?.id ?? "");
-                  activeSessionIdRef.current = next?.id ?? "";
-                }
-                setNotice("已删除会话");
-              }}
-              onTogglePinned={(id) => {
-                setChatSessions((items) => items.map((s) => s.id === id ? { ...s, pinned: !(s as ChatSession & { pinned?: boolean }).pinned } : s));
-              }}
-              onUpdateSessionStatus={(id, status) => {
-                setChatSessions((items) => items.map((s) => s.id === id ? { ...s, status } : s));
-                setNotice(status === "completed" ? "已标记为已完成" : "已恢复学习");
-              }}
-              historyOpen={chatHistoryOpen}
-              setHistoryOpen={setChatHistoryOpen}
-            />
-          </section>
-        )}
+        {activeView === "agent" && <AgentView />}
 
         {/* Dashboard - Review Panel */}
         {activeView === "dashboard" && activeDashboardPanel === "review" && (
@@ -1878,22 +1849,7 @@ export default function Home() {
         {activeView === "cards" && <CardsView />}
 
         {/* Settings Panel */}
-        {activeView === "settings" && (
-          <SettingsPanel
-            exam={exam}
-            subjects={subjects}
-            appSettings={appSettings}
-            onUpdateExam={(patch) => setExam((prev) => ({ ...prev, ...patch }))}
-            onAddSubject={(subject) => setSubjects((prev) => [...prev, subject])}
-            onUpdateSubject={(id, patch) => setSubjects((prev) =>
-              prev.map((s) => (s.id === id ? { ...s, ...patch } : s))
-            )}
-            onRemoveSubject={(id) => setSubjects((prev) => prev.filter((s) => s.id !== id))}
-            onUpdateAppSettings={(patch) => setAppSettings((prev) => ({ ...prev, ...patch }))}
-            onExportData={handleExportData}
-            onImportData={handleImportData}
-          />
-        )}
+        {activeView === "settings" && <SettingsView />}
 
         {/* ─── Completion Modal (Task result dialog) ─── */}
         {activeDialog === "task" && activeTask && (

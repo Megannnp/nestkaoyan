@@ -12,7 +12,7 @@ import { createContext, useContext, type Dispatch, type SetStateAction, type For
 import type {
   Subject, GrowthCard, CardCategory, KnowledgeNode, Resource, ActiveDialog,
   KnowledgePanel, WorkspaceView, PendingItem, Annotation, Question,
-  Task, AgentStep, AgentMessage,
+  Task, AgentStep, AgentMessage, ChatSession, ExamGoal, AppSettings,
 } from "../lib/types";
 import type { LearningEvent } from "../lib/events";
 
@@ -179,6 +179,25 @@ export interface WorkspaceCtx {
   openTaskDialog: (task: Task) => void;
   generatePlan: (input?: string) => void;
   runPrompt: (prompt?: string) => void;
+
+  // ── Agent 视图（AI 学习助手 / ChatPanel）所需 ──
+  chatSessions: ChatSession[];
+  activeSessionId: string;
+  activeSessionIdRef: { current: string };
+  chatHistoryOpen: boolean;
+  newChatSession: () => void;
+  setChatSessions: Dispatch<SetStateAction<ChatSession[]>>;
+  setActiveSessionId: Dispatch<SetStateAction<string>>;
+  setChatHistoryOpen: Dispatch<SetStateAction<boolean>>;
+
+  // ── Settings 视图所需 ──
+  exam: ExamGoal;
+  appSettings: AppSettings;
+  setExam: Dispatch<SetStateAction<ExamGoal>>;
+  setSubjects: Dispatch<SetStateAction<Subject[]>>;
+  setAppSettings: Dispatch<SetStateAction<AppSettings>>;
+  handleExportData: () => void;
+  handleImportData: (file: File) => Promise<void>;
 }
 
 const Ctx = createContext<WorkspaceCtx | null>(null);

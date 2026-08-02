@@ -122,7 +122,10 @@ test("knowledge/agent/cards/settings page code exists in page.tsx", async () => 
 
   // Settings
   assert.match(page, /activeView === "settings"/);
-  assert.match(page, /<SettingsPanel/);
+  // Settings 视图抽出为 SettingsView（内部渲染 SettingsPanel）
+  assert.match(page, /<SettingsView/);
+  const settings = await readFile(new URL("../app/components/SettingsView.tsx", import.meta.url), "utf8");
+  assert.match(settings, /<SettingsPanel/);
 
   // Dashboard heatmap + completion modal + timer
   assert.match(page, /heatmapGrid/);

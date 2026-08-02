@@ -112,7 +112,8 @@ test("knowledge/agent/cards/settings page code exists in page.tsx", async () => 
   assert.match(page, /moveCard/);
   assert.match(page, /openCardSource/);
   assert.match(page, /showRelatedQuestions/);
-  assert.match(page, /<CardViewer/);
+  // Cards 视图已抽出为 CardsView 组件（page.tsx 通过它挂载；CardViewer 现位于 CardsView.tsx）
+  assert.match(page, /<CardsView/);
 
   // Settings
   assert.match(page, /activeView === "settings"/);

@@ -100,8 +100,9 @@ test("knowledge/agent/cards/settings page code exists in page.tsx", async () => 
   assert.match(page, /activeView === "agent"/);
   assert.match(page, /runAgentWorkflow/);
   assert.match(page, /runPrompt/);
-  // UX Sprint 重构后类名为 quick-prompts（原 prompt-bar 已废弃）
-  assert.match(page, /quick-prompts/);
+  // UX Sprint 重构后类名为 quick-prompts；今日任务视图已抽出为 DashboardTasksView
+  const dashboard = await readFile(new URL("../app/components/DashboardTasksView.tsx", import.meta.url), "utf8");
+  assert.match(dashboard, /quick-prompts/);
 
   // Cards（视图抽出为 CardsView；复习队列逻辑随之迁移）
   const cards = await readFile(new URL("../app/components/CardsView.tsx", import.meta.url), "utf8");

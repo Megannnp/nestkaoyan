@@ -12,6 +12,7 @@ import { createContext, useContext, type Dispatch, type SetStateAction, type For
 import type {
   Subject, GrowthCard, CardCategory, KnowledgeNode, Resource, ActiveDialog,
   KnowledgePanel, WorkspaceView, PendingItem, Annotation, Question,
+  Task, AgentStep, AgentMessage,
 } from "../lib/types";
 import type { LearningEvent } from "../lib/events";
 
@@ -156,6 +157,24 @@ export interface WorkspaceCtx {
   onCreateAnnotation: (page: string, selection: string, tag: Annotation["tag"], note: string) => void;
   onEditAnnotation: (id: string, note: string) => void;
   onDeleteAnnotation: (id: string) => void;
+
+  // ── Dashboard（今日任务）视图所需 ──
+  tasks: Task[];
+  agentSteps: AgentStep[];
+  activeChatMessages: AgentMessage[];
+  quickPrompts: string[];
+  activeTimerTaskId: string;
+  timerStartTime: string;
+  updateTask: (id: string, patch: Partial<Task>) => void;
+  toggleTaskDone: (task: Task) => void;
+  moveTask: (id: string, direction: -1 | 1) => void;
+  startTask: (task: Task) => void;
+  pauseTimer: (task: Task) => void;
+  resumeTimer: (task: Task) => void;
+  handleEndLearning: (task: Task) => void;
+  openTaskDialog: (task: Task) => void;
+  generatePlan: (input?: string) => void;
+  runPrompt: (prompt?: string) => void;
 }
 
 const Ctx = createContext<WorkspaceCtx | null>(null);

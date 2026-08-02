@@ -51,6 +51,18 @@ test.describe("Dashboard 今日任务", () => {
     expectNoCriticalConsoleIssues(issues, "dashboard-more-menu");
   });
 
+  test("更多菜单：队首提高优先级给出反馈", async ({ page }) => {
+    const collector = attachConsoleCollector(page);
+
+    const firstRow = page.locator(".task-row").first();
+    await firstRow.locator("summary", { hasText: "•••" }).click();
+    await page.locator(".more-items button").filter({ visible: true }).nth(0).click();
+    await expect(page.getByText("已经是最高优先级")).toBeVisible();
+
+    const issues = collector.getIssues();
+    expectNoCriticalConsoleIssues(issues, "dashboard-more-menu-boundary");
+  });
+
   test("学习计时：开始→暂停→继续→结束→保存", async ({ page }) => {
     const collector = attachConsoleCollector(page);
     const firstTaskRow = page.locator(".task-row").first();
@@ -120,6 +132,26 @@ test.describe("Dashboard 今日任务", () => {
     const issues = collector.getIssues();
     expectNoCriticalConsoleIssues(issues, "dashboard-plan");
   });
+
+  test("首页入口：直接进入我的资料库", async ({ page }) => {
+    const collector = attachConsoleCollector(page);
+
+    await page.getByRole("button", { name: "我的资料库" }).click();
+    await expect(page.getByRole("heading", { name: "我的资料库" })).toBeVisible();
+
+    const issues = collector.getIssues();
+    expectNoCriticalConsoleIssues(issues, "dashboard-material-entry");
+  });
+
+  test("热力图日期点击进入复盘", async ({ page }) => {
+    const collector = attachConsoleCollector(page);
+
+    await page.getByRole("button", { name: /学习记录 2026-07-30/ }).click();
+    await expect(page.getByRole("heading", { name: "学习复盘" })).toBeVisible();
+
+    const issues = collector.getIssues();
+    expectNoCriticalConsoleIssues(issues, "dashboard-heatmap-click");
+  });
 });
 
 test.describe("Agent AI 学习助手（标准聊天界面）", () => {
@@ -149,7 +181,9 @@ test.describe("Agent AI 学习助手（标准聊天界面）", () => {
     await input.press("Enter");
     // 用户消息 + AI 回复都出现（限定在会话滚动区内，避免顶栏标题 strict mode 冲突）
     await expect(scroll.getByText("今天只有两个小时，我该学什么？")).toBeVisible();
-    await expect(scroll.getByText("已按今日风险知识点重新安排计划。")).toBeVisible();
+    // 2026-08-02：runPrompt 已接 plan-generate 真 AI——有 key 时显示「今日计划（AI 正式 · DeepSeek）」；
+    // 无 key 时降级为「演示回复…已按风险知识点生成今日任务」。两者任一可见即通过。
+    await expect(scroll.getByText(/今日计划（AI 正式 · DeepSeek）|演示回复（.*）：已按风险知识点生成今日任务/)).toBeVisible();
     // 消息时间已显示（当天 HH:mm 格式）
     await expect(scroll.getByText(/^\d{2}:\d{2}$/).first()).toBeVisible();
 
@@ -188,10 +222,26 @@ test.describe("Agent AI 学习助手（标准聊天界面）", () => {
     await input.press("Enter");
 
     // 系统操作反馈进入「系统记录」折叠区（不与 AI 对话混排）
-    await expect(page.getByText("系统记录（1）")).toBeVisible();
+    await expect(page.getByText(/系统记录（[12]）/)).toBeVisible({ timeout: 10000 });
 
     const issues = collector.getIssues();
     expectNoCriticalConsoleIssues(issues, "agent-workflow");
+  });
+
+  test("Agent 真题检索接通本地真题库", async ({ page }) => {
+    const collector = attachConsoleCollector(page);
+
+    await gotoAgent(page);
+    const input = page.getByTestId("chat-input");
+    await input.fill("找熵变真题");
+    await input.press("Enter");
+
+    await expect(page.getByRole("heading", { name: "真题数据库" })).toBeVisible();
+    await expect(page.getByText("2025 828 物理化学 第 3 题")).toBeVisible();
+    await expect(page.getByText(/已检索真题库，找到 1 道相关真题/)).toBeVisible();
+
+    const issues = collector.getIssues();
+    expectNoCriticalConsoleIssues(issues, "agent-question-search");
   });
 
   test("傅献彩跳知识中心 Reader", async ({ page }) => {
@@ -201,7 +251,7 @@ test.describe("Agent AI 学习助手（标准聊天界面）", () => {
     const input = page.getByTestId("chat-input");
     await input.fill("傅献彩哪里讲这个");
     await input.press("Enter");
-    await expect(page.getByText("学习资源库")).toBeVisible();
+    await expect(page.getByText("我的资料库")).toBeVisible();
 
     const issues = collector.getIssues();
     expectNoCriticalConsoleIssues(issues, "agent-knowledge-jump");

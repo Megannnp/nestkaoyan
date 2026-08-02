@@ -81,17 +81,17 @@ test("knowledge/agent/cards/settings page code exists in page.tsx", async () => 
   assert.match(page, /学习资料/);
   assert.match(page, /真题数据库/);
   assert.match(page, /知识图谱/);
-  assert.match(page, /学习资源库/);
+  assert.match(page, /我的资料库/);
   assert.match(page, /上传资源/);
-  assert.match(page, /📖 阅读/);
+  assert.match(page, /打开阅读/);
   assert.match(page, /activeKnowledgePanel === "resources"/);
   assert.match(page, /activeKnowledgePanel === "questions"/);
   assert.match(page, /activeKnowledgePanel === "graph"/);
   assert.match(page, /openResource/);
   assert.match(page, /inferResource/);
   assert.match(page, /addResource/);
-  assert.match(page, /addQuestion/);
-  assert.match(page, /addNode/);
+  assert.match(page, /analyzeMaterial/);
+  assert.match(page, /直接添加空白真题卷/);
 
   // Agent page
   assert.match(page, /activeView === "agent"/);

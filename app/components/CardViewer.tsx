@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import type { GrowthCard } from "../lib/types";
+import styles from "../../styles/components.module.css";
 
 interface CardViewerProps {
   activeCard: GrowthCard;
@@ -23,7 +24,7 @@ export function CardViewer({
 }: CardViewerProps) {
   return (
     <>
-      <div className={`flip-container ${cardFlipped ? "flipped" : ""}`} onClick={onFlip} style={{ minHeight: '300px', marginBottom: '16px' }}>
+      <div className={`flip-container ${cardFlipped ? "flipped" : ""} ${styles.flipContainerStandard}`} onClick={onFlip}>
         <div className="flipper">
           <div className="front">
             <div className="study-card-head mb-2 w-full">
@@ -109,7 +110,7 @@ export function FocusMode({ activeCard, cardFlipped, onFlip, onReview, onClose }
     // focus-card 内 stopPropagation；focus-card 容器外点遮罩才退出（用户需明确点击外部区域）
     <div className="focus-overlay" onClick={onClose}>
       <div className="focus-card" onClick={(e) => e.stopPropagation()}>
-        <div className={`flip-container ${cardFlipped ? "flipped" : ""}`} onClick={onFlip} style={{ minHeight: '340px' }}>
+        <div className={`flip-container ${cardFlipped ? "flipped" : ""} ${styles.flipContainerTall}`} onClick={onFlip}>
           <div className="flipper">
             <div className="front">
               <div className="text-[14px] font-bold text-[#52525B] mb-3">{activeCard.subject} / {activeCard.core}</div>

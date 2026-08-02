@@ -183,11 +183,8 @@ export function summarizeIssues(issues: CapturedConsoleIssue[], label: string): 
   for (const cat of categories) {
     lines.push(`  ${cat}: ${summary[cat]}`);
   }
-  // eslint-disable-next-line no-console
   console.log(`\n[ConsoleStats:${label}]`);
-  // eslint-disable-next-line no-console
   console.log(lines.join("\n"));
-  // eslint-disable-next-line no-console
   console.log("[ConsoleStats:end]\n");
 }
 
@@ -233,8 +230,14 @@ export async function freshState(page: Page): Promise<void> {
     }
   }, STORAGE_KEY);
   await page.goto("/");
-  await page.evaluate((key) => localStorage.clear(), STORAGE_KEY);
+  await page.evaluate((key) => {
+    localStorage.clear();
+    localStorage.setItem(key, JSON.stringify({ onboardingCompleted: true, storageVersion: 5 }));
+  }, STORAGE_KEY);
   await page.reload();
+  await expect(page.getByRole("button", { name: "知识中心" })).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await page.waitForTimeout(300);
 }
 
 /** 紧凑断言失败的分类输出（用于 test.step 内） */

@@ -139,6 +139,19 @@ export function ReaderPanel({
   const [showNewAnnotation, setShowNewAnnotation] = useState(false);
   const [newAnnotationText, setNewAnnotationText] = useState("");
   const [newAnnotationTag, setNewAnnotationTag] = useState<AnnotationTag>("重点");
+  // P3 交互修复（2026-08-01）：批注内联编辑 + 两阶段删除（替代原生 prompt/confirm）
+  const [editingAnnId, setEditingAnnId] = useState<string | null>(null);
+  const [editingAnnText, setEditingAnnText] = useState("");
+  const [confirmDeleteAnnId, setConfirmDeleteAnnId] = useState<string | null>(null);
+  // P3 交互修复：本地短提示（批注表单 / 保存进度 / 搜索无匹配，避免依赖父级 toast 连通性）
+  const [noticeText, setNoticeText] = useState<string | null>(null);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const flash = useCallback((text: string) => {
+    setNoticeText(text);
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => setNoticeText(null), 2200);
+  }, []);
+  useEffect(() => () => { if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current); }, []);
   // Stabilization 1A-2: PDF.js 状态
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pdfTotalPages, setPdfTotalPages] = useState<number | null>(null);
@@ -192,7 +205,11 @@ export function ReaderPanel({
   }, [maxPages, onSetReaderPage]);
 
   const handleSubmitAnnotation = useCallback(() => {
-    if (!newAnnotationText.trim()) return;
+    // P3 交互修复（2026-08-01）：空内容不再静默返回，给出可见提示
+    if (!newAnnotationText.trim()) {
+      flash("请输入批注内容");
+      return;
+    }
     onCreateAnnotation?.(
       String(currentPage),
       newAnnotationText.trim(),
@@ -202,7 +219,8 @@ export function ReaderPanel({
     setNewAnnotationText("");
     setNewAnnotationTag("重点");
     setShowNewAnnotation(false);
-  }, [newAnnotationText, newAnnotationTag, currentPage, onCreateAnnotation]);
+    flash("批注已添加");
+  }, [newAnnotationText, newAnnotationTag, currentPage, onCreateAnnotation, flash]);
 
   // ─── Stabilization 1A-2: PDF 加载（IndexedDB → pdfjs-dist → Blob URL）───
   useEffect(() => {
@@ -392,7 +410,7 @@ export function ReaderPanel({
           >
             <option>80%</option><option>100%</option><option>125%</option>
           </select>
-          <button onClick={onSaveProgress} className={styles.readerSaveBtn}>
+          <button onClick={() => { onSaveProgress(); flash("已保存阅读进度"); }} className={styles.readerSaveBtn}>
             保存
           </button>
         </div>
@@ -420,7 +438,7 @@ export function ReaderPanel({
                 {pdfLoading && (
                   <p className="text-[12px] text-[#71717A] mb-2">正在加载 PDF…</p>
                 )}
-                <canvas ref={canvasRef} style={{ maxWidth: "100%", border: "1px solid #E4E4E7", borderRadius: 8 }} />
+                <canvas ref={canvasRef} className={styles.readerCanvas} />
                 {annotationCount > 0 && (
                   <div className="space-y-2 mt-4">
                     {subjectAnnotations.filter((ann) => Number(ann.page) === currentPage).map((ann) => {
@@ -468,7 +486,7 @@ export function ReaderPanel({
                       </div>
                     );
                   })}
-                  <p className={styles.contentText} style={{ color: "#A1A1AA", paddingTop: 4 }}>··· 其余内容</p>
+                  <p className={`${styles.contentText} ${styles.readerEllipsis}`}>··· 其余内容</p>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -488,6 +506,10 @@ export function ReaderPanel({
                     }
                     return <p key={i} className={styles.contentText}>{para}</p>;
                   })}
+                  {/* P3 交互修复：搜索无匹配时给出可见提示 */}
+                  {readerSearch.trim() && !pageContent.some((para) => searchInContent(para, readerSearch)) && (
+                    <p className={`${styles.contentText} ${styles.readerSearchEmpty}`}>未找到与「{readerSearch}」匹配的内容</p>
+                  )}
                 </div>
               )}
             </>
@@ -510,7 +532,7 @@ export function ReaderPanel({
             </div>
           )}
           {subjectNodes.length > 0 && (
-            <div className={styles.relatedPanel} style={{ minWidth: 150 }}>
+            <div className={`${styles.relatedPanel} ${styles.relatedPanelMin}`}>
               <div className={styles.relatedLabel}>🧠 知识点</div>
               <div className={styles.relatedButtons}>
                 {subjectNodes.slice(0, 4).map((n) => (
@@ -531,7 +553,7 @@ export function ReaderPanel({
               <span className={styles.aiAssistantLabel}>本页重点：</span>
               {aiHint.keyPoint}
             </p>
-            <p className={styles.aiAssistantText} style={{ marginTop: 8 }}>
+            <p className={`${styles.aiAssistantText} ${styles.aiAssistantTopMargin}`}>
               <span className={styles.aiAssistantLabel}>考频：</span>
               {aiHint.examFreq}
             </p>
@@ -583,15 +605,14 @@ export function ReaderPanel({
 
       {/* ═══ 右：批注面板 ═══ */}
       <div className={`${styles.annotationPanel} ${showAnnotations ? "" : ""}`}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <div className={styles.annotationToolbar}>
           <button className={styles.annotationToggleBtn} onClick={() => setShowAnnotations(!showAnnotations)}>
             📌 批注 {showAnnotations ? "▶" : `(${annotationCount})`}
           </button>
           {onCreateAnnotation && (
             <button
-              className={styles.annotationToggleBtn}
+              className={`${styles.annotationToggleBtn} ${styles.annotationNewBtn}`}
               onClick={() => setShowNewAnnotation(true)}
-              style={{ background: "#18181B", color: "white" }}
             >
               ✏ 新建
             </button>
@@ -614,7 +635,7 @@ export function ReaderPanel({
               if (!items.length) return null;
               const color = resolveAnnotationColor(tag);
               return (
-                <div key={tag} style={{ marginBottom: 8 }}>
+                <div key={tag} className={styles.annotationGroup}>
                   <div className={styles.annotationSectionHead}>
                     <span>{color.dot}</span>
                     <span className={styles.annotationSectionLabel}>{tag}</span>
@@ -625,21 +646,67 @@ export function ReaderPanel({
                       <div key={item.id} className={styles.annotationItem}
                         style={{ backgroundColor: color.bg, borderLeft: `3px solid ${color.border}` }}
                         onClick={() => onJumpToPage(item.page)}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
+                        <div className={styles.annotationItemHead}>
                           <span className={styles.annotationPage} style={{ color: color.border }}>P{item.page}</span>
                         </div>
                         <p className={styles.annotationText}>{item.selection}</p>
-                        {item.note && <p className={styles.annotationNote}>✏ {item.note}</p>}
-                        <div className={styles.annotationActions}>
-                          <button className={styles.annotationActionBtn}
-                            onClick={(e) => { e.stopPropagation(); const n = prompt('编辑', item.note); if (n !== null) onEditAnnotation(item.id, n); }}>
-                            编辑
-                          </button>
-                          <button className={`${styles.annotationActionBtn} ${styles.annotationActionDanger}`}
-                            onClick={(e) => { e.stopPropagation(); if (confirm('删除？')) onDeleteAnnotation(item.id); }}>
-                            删除
-                          </button>
-                        </div>
+                        {editingAnnId === item.id ? (
+                          // P3 交互修复：内联编辑（替代原生 prompt）
+                          <div onClick={(e) => e.stopPropagation()} className={styles.annotationEditBlock}>
+                            <input
+                              className={styles.annotationEditInput}
+                              value={editingAnnText}
+                              onChange={(e) => setEditingAnnText(e.target.value)}
+                              placeholder="批注备注"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  onEditAnnotation(item.id, editingAnnText.trim());
+                                  flash("批注已更新");
+                                  setEditingAnnId(null);
+                                }
+                                if (e.key === "Escape") setEditingAnnId(null);
+                              }}
+                            />
+                            <div className={`${styles.annotationActions} ${styles.annotationActionsMargin}`}>
+                              <button className={styles.annotationActionBtn}
+                                onClick={() => { onEditAnnotation(item.id, editingAnnText.trim()); flash("批注已更新"); setEditingAnnId(null); }}>
+                                保存
+                              </button>
+                              <button className={styles.annotationActionBtn}
+                                onClick={() => setEditingAnnId(null)}>
+                                取消
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {item.note && <p className={styles.annotationNote}>✏ {item.note}</p>}
+                            <div className={styles.annotationActions}>
+                              <button className={styles.annotationActionBtn}
+                                onClick={(e) => { e.stopPropagation(); setEditingAnnId(item.id); setEditingAnnText(item.note || ""); }}>
+                                编辑
+                              </button>
+                              {confirmDeleteAnnId === item.id ? (
+                                <span onClick={(e) => e.stopPropagation()} className={styles.annotationActions}>
+                                  <button className={`${styles.annotationActionBtn} ${styles.annotationActionDanger}`}
+                                    onClick={() => { onDeleteAnnotation(item.id); flash("批注已删除"); setConfirmDeleteAnnId(null); }}>
+                                    确认删除
+                                  </button>
+                                  <button className={styles.annotationActionBtn}
+                                    onClick={() => setConfirmDeleteAnnId(null)}>
+                                    取消
+                                  </button>
+                                </span>
+                              ) : (
+                                <button className={`${styles.annotationActionBtn} ${styles.annotationActionDanger}`}
+                                  onClick={(e) => { e.stopPropagation(); setConfirmDeleteAnnId(item.id); }}>
+                                  删除
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -649,24 +716,21 @@ export function ReaderPanel({
 
             {/* ⚠ 显式隔离渲染：非法历史标签分组（红色警告，不崩溃） */}
             {annotationsByTag.unknown.length > 0 && (
-              <div style={{ marginBottom: 8 }}>
-                <div className={styles.annotationSectionHead}
-                  style={{ color: "#DC2626" }}>
+              <div className={styles.annotationInvalidGroup}>
+                <div className={`${styles.annotationSectionHead} ${styles.annotationInvalidHead}`}>
                   <span>⚠️</span>
                   <span className={styles.annotationSectionLabel}>{UNKNOWN_ANNOTATION_TAG}</span>
                   <span className={styles.annotationSectionCount}>{annotationsByTag.unknown.length}</span>
                 </div>
-                <div className={styles.annotationSectionLabel}
-                  style={{ color: "#DC2626", fontSize: 11, marginBottom: 4 }}>
+                <div className={styles.annotationInvalidLabel}>
                   {UNKNOWN_ANNOTATION_COLOR.label}
                 </div>
                 {annotationsByTag.unknown.map((item) => (
-                  <div key={item.id} className={styles.annotationItem}
-                    style={{ backgroundColor: "#FEF2F2", borderLeft: "3px solid #DC2626" }}
+                  <div key={item.id} className={`${styles.annotationItem} ${styles.annotationInvalidItem}`}
                     onClick={() => onJumpToPage(item.page)}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
+                    <div className={styles.annotationItemHead}>
                       <span className={styles.annotationPage} style={{ color: "#DC2626" }}>P{item.page}</span>
-                      <span style={{ fontSize: 11, color: "#DC2626" }}>非法标签: {String(item.tag)}</span>
+                      <span className={styles.annotationInvalidSpan}>非法标签: {String(item.tag)}</span>
                     </div>
                     <p className={styles.annotationText}>{item.selection}</p>
                     {item.note && <p className={styles.annotationNote}>✏ {item.note}</p>}
@@ -683,6 +747,13 @@ export function ReaderPanel({
           </>
         )}
       </div>
+
+      {/* P3 交互修复：本地短提示（批注/保存/搜索反馈） */}
+      {noticeText && (
+        <div className={styles.readerFlashStatic}>
+          {noticeText}
+        </div>
+      )}
     </div>
   );
 }

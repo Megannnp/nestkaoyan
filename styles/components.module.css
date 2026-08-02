@@ -913,3 +913,525 @@
   border: 1px solid #D4D4D8;
   cursor: pointer;
 }
+
+/* ════════════════════════════════════════════
+   Settings 面板（2026-08-02 P3 内联样式迁移）
+   ════════════════════════════════════════════ */
+
+/* 区块间距 */
+.settingsSection {
+  margin-bottom: 28px;
+}
+
+/* 区块标题（主标题） */
+.settingsH2 {
+  margin: 4px 0 16px;
+  font-size: 20px;
+  font-weight: 700;
+  color: #18181B;
+}
+
+/* 区块标题（副标题，科目/AI/数据管理） */
+.settingsH3 {
+  margin: 2px 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #18181B;
+}
+
+/* 总分目标汇总卡（灰底大数字） */
+.totalTargetCard {
+  padding: 16px;
+  border-radius: 10px;
+  background: #F4F4F5;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.totalTargetLabel {
+  font-size: 11px;
+  color: #71717A;
+  font-weight: 700;
+}
+
+.totalTargetValue {
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.totalTargetValueDanger {
+  color: #EF4444;
+}
+
+.totalTargetValueOk {
+  color: #18181B;
+}
+
+.totalTargetSlash {
+  font-size: 16px;
+  color: #A1A1AA;
+  font-weight: 400;
+}
+
+.totalTargetSpacer {
+  flex: 1;
+}
+
+.totalTargetNote {
+  font-size: 12px;
+  color: #71717A;
+}
+
+/* 表单网格：考试信息 / 新增科目字段 / 科目字段 */
+.settingsGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.settingsGridExam {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.settingsGridSubject {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.settingsGridAddForm {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+/* 输入/选择：与 label 的间距（替代 style marginTop） */
+.settingsInputMargin {
+  margin-top: 4px;
+}
+
+.settingsInputMarginSm {
+  margin-top: 2px;
+}
+
+/* 科目行卡片 */
+.subjectRowCard {
+  padding: 14px;
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.subjectRowHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.subjectRowName {
+  font-size: 14px;
+  color: #18181B;
+}
+
+.subjectRowInput {
+  width: 160px;
+  font-size: 13px;
+}
+
+.subjectActions {
+  display: flex;
+  gap: 6px;
+}
+
+.subjectSelectFull {
+  width: 100%;
+}
+
+.valueSmall {
+  font-size: 12px;
+  color: #71717A;
+  margin-top: 2px;
+}
+
+.valueStrong {
+  font-size: 12px;
+  font-weight: 700;
+  color: #18181B;
+  margin-top: 2px;
+}
+
+.valueDanger {
+  color: #EF4444;
+}
+
+.scorePair {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.scoreInput {
+  width: 56px;
+  font-size: 12px;
+  text-align: center;
+  min-height: 30px;
+}
+
+.scoreInputSm {
+  width: 50px;
+  font-size: 12px;
+  text-align: center;
+  min-height: 30px;
+}
+
+.scoreSlash {
+  font-size: 11px;
+  color: #A1A1AA;
+}
+
+/* 按钮紧凑（编辑/删除/添加等小按钮） */
+.btnCompact {
+  min-height: 26px;
+  font-size: 11px;
+  padding: 0 10px;
+}
+
+.btnSmall {
+  min-height: 30px;
+  font-size: 12px;
+}
+
+.btnSmaller {
+  min-height: 28px;
+  font-size: 12px;
+  padding: 0 12px;
+}
+
+.btnMedium {
+  min-height: 32px;
+  font-size: 12px;
+}
+
+.btnDanger {
+  background: #EF4444;
+}
+
+.btnDangerText {
+  color: #EF4444;
+}
+
+.btnDangerHover:hover {
+  background: #FEF2F2;
+}
+
+/* AI 开关行 */
+.aiToggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #F4F4F5;
+  cursor: pointer;
+}
+
+.aiToggleLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: #18181B;
+}
+
+.aiToggleDesc {
+  font-size: 12px;
+  color: #71717A;
+  margin-top: 2px;
+}
+
+.aiToggleCheckbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #18181B;
+  flex-shrink: 0;
+}
+
+/* AI 配置容器 */
+.aiConfigBox {
+  padding: 0 14px 4px;
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.aiDetailRow {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.aiDetailLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: #18181B;
+  min-width: 80px;
+}
+
+.aiDetailButtons {
+  display: flex;
+  gap: 6px;
+}
+
+.aiEngineNote {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #71717A;
+}
+
+/* 新增科目表单 */
+.addFormBox {
+  padding: 14px;
+  border: 1px solid #18181B;
+  border-radius: 8px;
+  background: #F4F4F5;
+  margin-bottom: 12px;
+}
+
+.addFormTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: #18181B;
+  margin-bottom: 8px;
+}
+
+.addFormError {
+  font-size: 12px;
+  color: #EF4444;
+  margin-bottom: 6px;
+}
+
+.addFormActions {
+  display: flex;
+  gap: 6px;
+}
+
+/* 科目列表 */
+.subjectList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.subjectEmpty {
+  padding: 24px;
+  text-align: center;
+  color: #A1A1AA;
+  font-size: 13px;
+  border: 1px dashed #D4D4D8;
+  border-radius: 8px;
+}
+
+/* 底部汇总 */
+.subjectSummary {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #F4F4F5;
+  font-size: 12px;
+  color: #71717A;
+  text-align: center;
+}
+
+/* 当前学习内容（编辑展开） */
+.currentProgressBlock {
+  margin-top: 8px;
+  display: block;
+}
+
+/* 数据管理 */
+.dataBox {
+  padding: 16px;
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+  color: #71717A;
+}
+
+.dataDesc {
+  margin-bottom: 14px;
+  line-height: 1.6;
+}
+
+.dataActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+/* ════════════════════════════════════════════
+   ReaderPanel 内联样式迁移（2026-08-02 P3-1b）
+   ════════════════════════════════════════════ */
+
+/* PDF Canvas */
+.readerCanvas {
+  max-width: 100%;
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+}
+
+/* 演示内容占位提示 */
+.readerPlaceholderText {
+  color: #A1A1AA;
+  padding-top: 4px;
+}
+
+.readerSearchEmpty {
+  color: #A1A1AA;
+}
+
+/* 关联面板最小宽度 */
+.relatedPanelMin {
+  min-width: 150px;
+}
+
+/* AI 助手上方间距 */
+.aiAssistantTopMargin {
+  margin-top: 8px;
+}
+
+/* 批注面板工具栏 */
+.annotationToolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.annotationNewBtn {
+  background: #18181B;
+  color: white;
+}
+
+/* 批注分组容器 */
+.annotationGroup {
+  margin-bottom: 8px;
+}
+
+/* 批注项头部行 */
+.annotationItemHead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+/* 内联编辑容器 */
+.annotationEditBlock {
+  margin-top: 4px;
+}
+
+.annotationEditInput {
+  width: 100%;
+  min-height: 30px;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #D4D4D8;
+}
+
+.annotationActionsMargin {
+  margin-top: 4px;
+}
+
+/* 非法标签分组 */
+.annotationInvalidGroup {
+  margin-bottom: 8px;
+}
+
+.annotationInvalidHead {
+  color: #DC2626;
+}
+
+.annotationInvalidLabel {
+  color: #DC2626;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.annotationInvalidSpan {
+  font-size: 11px;
+  color: #DC2626;
+}
+
+/* 本地短提示（flash） */
+.readerFlashStatic {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 200;
+  background: #18181B;
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  pointer-events: none;
+}
+
+/* 批注分隔行（··· 其余内容） */
+.readerEllipsis {
+  color: #A1A1AA;
+  padding-top: 4px;
+}
+
+/* 非法批注条 */
+.annotationInvalidItem {
+  background-color: #FEF2F2;
+  border-left: 3px solid #DC2626;
+}
+
+/* ════════════════════════════════════════════
+   其余组件静态内联迁移（2026-08-02 P3-1c）
+   ════════════════════════════════════════════ */
+
+/* ChatPanel */
+.chatPanelHeight {
+  height: calc(100vh - 120px);
+}
+
+.sessionItemHeight {
+  height: 88px;
+}
+
+/* CardViewer */
+.flipContainerStandard {
+  min-height: 300px;
+  margin-bottom: 16px;
+}
+
+.flipContainerTall {
+  min-height: 340px;
+}
+
+/* Sidebar */
+.sidebarHeatmapScroller {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(161,161,170,0.5) transparent;
+}
+
+.sidebarHeatmapInner {
+  min-width: max-content;
+}

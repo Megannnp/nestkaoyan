@@ -125,6 +125,19 @@ test.describe("Cards 卡片中心", () => {
     expectNoCriticalConsoleIssues(issues, "cards-keyboard");
   });
 
+  test("专注模式：Escape 退出", async ({ page }) => {
+    const collector = attachConsoleCollector(page);
+
+    await gotoAllCardsGroup(page);
+    await page.getByRole("button", { name: "专注学习" }).click();
+    await expect(page.locator(".focus-overlay")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".focus-overlay")).toHaveCount(0);
+
+    const issues = collector.getIssues();
+    expectNoCriticalConsoleIssues(issues, "cards-focus-escape");
+  });
+
   test("卡片管理：卡片网格 + 编辑 + 删除", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
@@ -155,6 +168,40 @@ test.describe("Cards 卡片中心", () => {
 
     const issues = collector.getIssues();
     expectNoCriticalConsoleIssues(issues, "cards-manage-edit-delete");
+  });
+
+  test("卡片状态筛选：收藏只显示收藏卡片", async ({ page }) => {
+    const collector = attachConsoleCollector(page);
+
+    await gotoAllCardsGroup(page);
+    await createCardViaModal(page, "E2E收藏筛选-收藏");
+    await createCardViaModal(page, "E2E收藏筛选-未收藏");
+    await page.getByRole("button", { name: "全部", exact: true }).first().click();
+
+    const favoriteCard = page.locator(".study-card", { hasText: "E2E收藏筛选-收藏" });
+    await favoriteCard.getByRole("button", { name: "收藏", exact: true }).click();
+    await page.getByRole("button", { name: "收藏", exact: true }).first().click();
+
+    await expect(page.locator(".study-card", { hasText: "E2E收藏筛选-收藏" })).toBeVisible();
+    await expect(page.locator(".study-card", { hasText: "E2E收藏筛选-未收藏" })).toHaveCount(0);
+
+    const issues = collector.getIssues();
+    expectNoCriticalConsoleIssues(issues, "cards-favorite-filter");
+  });
+
+  test("卡片分组：按时间显示真实分组", async ({ page }) => {
+    const collector = attachConsoleCollector(page);
+
+    await gotoAllCardsGroup(page);
+    await createCardViaModal(page, "E2E按时间分组");
+    await page.getByRole("button", { name: "全部", exact: true }).first().click();
+    await page.getByRole("button", { name: "按时间" }).click();
+
+    await expect(page.getByText("未复习").first()).toBeVisible();
+    await expect(page.getByText(/张卡片/).first()).toBeVisible();
+
+    const issues = collector.getIssues();
+    expectNoCriticalConsoleIssues(issues, "cards-time-group");
   });
 
   test("新建卡片弹窗：精简字段 + 更多设置折叠 + 默认卡片组", async ({ page }) => {
@@ -195,6 +242,29 @@ test.describe("Cards 卡片中心", () => {
 
     const issues = collector.getIssues();
     expectNoCriticalConsoleIssues(issues, "cards-manual-create");
+  });
+
+  test("新建卡片：切换科目后卡片组不跨学科", async ({ page }) => {
+    const collector = attachConsoleCollector(page);
+
+    await gotoAllCardsGroup(page);
+    await page.getByRole("button", { name: "← 返回" }).click();
+    await page.getByRole("button", { name: /新建卡片组/ }).last().click();
+    await page.getByPlaceholder("最多 30 字").fill("828专属组");
+    await page.getByRole("button", { name: "创建", exact: true }).click();
+    await expect(page.getByRole("button", { name: /828专属组/ }).first()).toBeVisible();
+
+    await page.getByRole("button", { name: /全部卡片/ }).first().click();
+    await page.getByRole("button", { name: "新建卡片" }).click();
+    const dialog = page.getByLabel("新建成长卡片");
+    await dialog.locator("summary", { hasText: "更多设置" }).click();
+    await dialog.locator('select[name="subject"]').selectOption({ label: "英语一" });
+
+    await expect(dialog.locator('select[name="category"] option', { hasText: "828专属组" })).toHaveCount(0);
+    await expect(dialog.locator('select[name="category"]')).toHaveValue("");
+
+    const issues = collector.getIssues();
+    expectNoCriticalConsoleIssues(issues, "cards-category-subject-isolation");
   });
 
   test("学科 Tab：切换学科后数据隔离（英语一不显示 828 卡片）", async ({ page }) => {

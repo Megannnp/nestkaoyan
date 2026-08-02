@@ -5,7 +5,7 @@ export type WorkspaceView = "dashboard" | "agent" | "knowledge" | "cards" | "set
 export type KnowledgePanel = "resources" | "questions" | "graph" | "landing";
 export type DashboardPanel = "tasks" | "review";
 export type ReviewScope = "日复盘" | "周复盘" | "月复盘";
-export type ActiveDialog = "resource" | "question" | "node" | "card" | "task" | "annotation" | "exam" | "subject" | "review" | null;
+export type ActiveDialog = "resource" | "card" | "task" | "annotation" | "exam" | "subject" | "review" | null;
 export type ReaderTab = "annotations" | "knowledge" | "cards" | "ai";
 export type DeletedBackup =
   | { collection: "subjects"; item: Subject; label: string }
@@ -77,6 +77,110 @@ export const RESOURCE_KIND_TO_LEGACY_TYPE: Record<ResourceType, string> = {
   other: "学习资料",
 };
 
+/**
+ * Material-First（2026-08-01 架构决策）
+ * 系统以「资料（Material）」为一级入口。Resource 是 Material 的前身/存储兼容名，
+ * 新增 Material/MaterialSection 作为目标模型，供首页资料库与 AI 分析资料流程使用。
+ * v6 起 materials/materialSections 作为资料层权威结构；resources 保留为旧 UI/Reader 兼容字段。
+ */
+export type MaterialType =
+  | "textbook"       // 教材：傅献彩第六版
+  | "past_paper"     // 真题：哈工大828 2015-2025
+  | "exercise_book"  // 习题集：沈文霞考研指导
+  | "handout"        // 讲义/笔记：自己整理的笔记
+  | "lecture";       // 课程讲义
+
+export type MaterialStatus =
+  | "pending"        // 待分析（刚导入）
+  | "analyzing"      // 分析中
+  | "analyzed"       // 已分析
+  | "partial";       // 部分分析
+
+export type Material = {
+  id: string;
+  subjectId: string;
+  name: string;
+  type: MaterialType;
+  status: MaterialStatus;
+  fileStorageKey?: string;   // IndexedDB PDF 二进制
+  fileName?: string;
+  source?: string;
+  currentPage: string;
+  lastOpenedPage?: string;
+  createdAt?: string;
+  // AI 分析资料结果（解析链）
+  analysis?: {
+    sectionsCount: number;
+    questionsCount: number;
+    knowledgePointCount: number;
+    coreConcepts: string[];
+    highFrequencyPoints: string[];
+    analyzedAt?: string;
+  };
+};
+
+export type MaterialSection = {
+  id: string;
+  materialId: string;
+  sectionType: "chapter" | "exam" | "unit" | "topic";
+  title: string;             // 章节名 / 2024年真题
+  order: number;
+  pageRange?: string;
+  questionIds?: string[];
+  knowledgePointIds?: string[];
+  analyzed?: boolean;
+};
+
+/** 由 Resource 派生 Material（兼容旧字段，materialId 映射 resource.id） */
+export function resourceToMaterial(resource: Resource, subjectId = resource.subject): Material {
+  return {
+    id: resource.id,
+    subjectId,
+    name: resource.name,
+    type: resource.type.includes("真题") ? "past_paper"
+      : resource.type.includes("教材") ? "textbook"
+      : resource.type.includes("辅导") || resource.type.includes("习题") ? "exercise_book"
+      : resource.type.includes("笔记") ? "handout" : "lecture",
+    status: resource.status === "已索引" ? "analyzed" : "pending",
+    fileStorageKey: resource.fileStorageKey,
+    fileName: resource.fileName,
+    currentPage: resource.currentPage,
+    lastOpenedPage: resource.lastOpenedPage,
+    createdAt: resource.createdAt,
+  };
+}
+
+export function resourceToMaterialSections(resource: Resource, questions: Question[] = []): MaterialSection[] {
+  const relatedQuestions = questions.filter((question) => question.materialId === resource.id || question.source.includes(resource.name) || question.source.includes(resource.fileName));
+  if (resource.type.includes("真题")) {
+    const years = Array.from(new Set(relatedQuestions.map((question) => question.year).filter(Boolean)));
+    const fallbackYears = years.length > 0 ? years : (resource.version.match(/20\d{2}/g) ?? [resource.currentPage || "待识别"]);
+    return fallbackYears.map((year, index) => ({
+      id: `${resource.id}-section-${year || index + 1}`,
+      materialId: resource.id,
+      sectionType: "exam",
+      title: `${year} 年真题`,
+      order: index + 1,
+      pageRange: year,
+      questionIds: relatedQuestions.filter((question) => question.year === year).map((question) => question.id),
+      knowledgePointIds: [],
+      analyzed: resource.status === "已索引",
+    }));
+  }
+  const title = resource.linkedNode.split("/").map((part) => part.trim()).filter(Boolean).slice(-1)[0] || resource.name;
+  return [{
+    id: `${resource.id}-section-main`,
+    materialId: resource.id,
+    sectionType: "chapter",
+    title,
+    order: 1,
+    pageRange: resource.pages,
+    questionIds: relatedQuestions.map((question) => question.id),
+    knowledgePointIds: [],
+    analyzed: resource.status === "已索引",
+  }];
+}
+
 export type Resource = {
   id: string;
   name: string;
@@ -111,6 +215,9 @@ export type Resource = {
 
 export type Question = {
   id: string;
+  // Material-First（2026-08-01）：题目归属资料 + 章节/套卷（可选；旧数据按 source 猜测）
+  materialId?: string;
+  sectionId?: string;
   subject: string;
   school: string;
   year: string;

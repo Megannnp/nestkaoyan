@@ -2,6 +2,7 @@
 
 import { s } from "../lib/css-utils";
 import type { WorkspaceView, ExamGoal } from "../lib/types";
+import styles from "../../styles/components.module.css";
 
 interface SidebarProps {
   daysLeft: number;
@@ -75,8 +76,8 @@ export function Sidebar({
           <div className="text-[13px] font-semibold leading-[1.4] text-[#18181B] shrink-0">学习记录</div>
           <div className="text-[11px] leading-[1.4] text-[#71717A] shrink-0 whitespace-nowrap">开始于 {heatmapStartFormatted}</div>
         </div>
-        <div className="w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(161,161,170,0.5) transparent' }} ref={heatmapRef}>
-          <div className="w-max" style={{ minWidth: 'max-content' }}>
+        <div className={`w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden ${styles.sidebarHeatmapScroller}`} ref={heatmapRef}>
+          <div className={`w-max ${styles.sidebarHeatmapInner}`}>
             {/* Month labels */}
             <div className="flex gap-[2px] mb-[2px] ml-[29px]">
               {heatmapMonths.map((m, i) => (
@@ -104,8 +105,11 @@ export function Sidebar({
                     else if (!isFuture && level === 3) color = 'bg-[#71717A]';
                     else if (!isFuture && level === 4) color = 'bg-[#27272A]';
                     return (
-                      <div key={day.date}
-                        className={`w-[12px] h-[12px] rounded-[2px] ${color} cursor-default ${isToday ? 'ring-[1px] ring-[#52525B]' : ''} ${isExam ? 'ring-[1px] ring-[#18181B]' : ''}`}
+                      <button key={day.date}
+                        type="button"
+                        aria-label={`学习记录 ${day.date}`}
+                        title={day.date}
+                        className={`w-[12px] h-[12px] rounded-[2px] ${color} cursor-pointer border-0 p-0 ${isToday ? 'ring-[1px] ring-[#52525B]' : ''} ${isExam ? 'ring-[1px] ring-[#18181B]' : ''}`}
                         onMouseEnter={(e) => onCellMouseEnter(e, day.date)}
                         onMouseLeave={onCellMouseLeave}
                         onClick={(e) => onCellClick(e, day.date)} />

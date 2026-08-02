@@ -2,7 +2,7 @@
  * Stabilization 1C-2: Storage Contract 迁移 / 回滚演练
  *
  * 依据 docs/STORAGE_CONTRACT.md §6（1C-2）验证：
- *   ① 模拟 v3+v4 共存现场 → 迁移 → 校验 storageVersion=5
+ *   ① 模拟 v3+v4 共存现场 → 迁移 → 校验 storageVersion=STORAGE_VERSION（当前 6）
  *   ② 回滚演练：删除新 key 后重跑迁移仍成功
  *   ③ 迁移后 v3/v4 原样保留（可回滚）
  *   ④ v4 Memory 字段补充不覆盖 v3 同名业务字段
@@ -57,14 +57,14 @@ afterEach(() => {
   delete (globalThis as Record<string, unknown>).window;
 });
 
-test("① 模拟 v3+v4 共存现场 → 迁移 → 校验 storageVersion=5 与业务基座", () => {
+test("① 模拟 v3+v4 共存现场 → 迁移 → 校验 storageVersion=STORAGE_VERSION（当前 6）与业务基座", () => {
   store.set(LEGACY_KEY_V3, JSON.stringify(v3sample));
   store.set(LEGACY_KEY_V4, JSON.stringify(v4sample));
 
   const result = hydrateWorkspace();
 
   assert.ok(result, "迁移后应返回数据");
-  assert.equal(result.storageVersion, STORAGE_VERSION, "storageVersion 应为 5");
+  assert.equal(result.storageVersion, STORAGE_VERSION, "storageVersion 应为当前版本（STORAGE_VERSION）");
   // 业务基座来自 v3（不被 v4 覆盖）
   assert.equal(result.exam.examName, "验收测试考试", "exam 应来自 v3 而非 v4");
   assert.equal(result.subjects?.[0]?.name, "828 物理化学");
@@ -80,7 +80,7 @@ test("② 回滚演练：删除新 key 后重跑迁移仍成功", () => {
   store.set(LEGACY_KEY_V3, JSON.stringify(v3sample));
   const first = hydrateWorkspace();
   assert.equal(first?.storageVersion, STORAGE_VERSION);
-  assert.ok(store.has(WORKSPACE_KEY), "首次迁移后应写入 v5 key");
+  assert.ok(store.has(WORKSPACE_KEY), "首次迁移后应写入 workspace key");
 
   // 模拟回滚：删除新 key，保留旧 key
   store.delete(WORKSPACE_KEY);
@@ -109,15 +109,15 @@ test("③ 迁移后 v3/v4 原样保留（可回滚）", () => {
   assert.ok(typeof v4After.__migratedAt === "string");
 });
 
-test("④ 已存在 v5 时不重复迁移（幂等）", () => {
-  // 直接写入 v5（模拟已完成迁移状态）
+test("④ 已存在 workspace key 时不重复迁移（幂等）", () => {
+  // 直接写入 workspace key（模拟已完成迁移状态）
   store.set(WORKSPACE_KEY, JSON.stringify({ storageVersion: STORAGE_VERSION, exam: { examName: "直接写入" } }));
 
-  // 同时存在旧 key（不应触发重复迁移,直接使用 v5）
+  // 同时存在旧 key（不应触发重复迁移,直接使用当前 key）
   store.set(LEGACY_KEY_V3, JSON.stringify(v3sample));
 
   const result = hydrateWorkspace();
-  assert.equal(result?.exam.examName, "直接写入", "应直接使用 v5,不重复迁移");
+  assert.equal(result?.exam.examName, "直接写入", "应直接使用当前 key,不重复迁移");
 });
 
 test("⑤ 只读保护：版本高于当前 → 拒绝读取", () => {
@@ -129,7 +129,7 @@ test("⑤ 只读保护：版本高于当前 → 拒绝读取", () => {
   assert.ok(store.has(WORKSPACE_KEY), "只读保护不清除原 key");
 });
 
-test("⑥ v5 损坏现场 → 备份 corrupt_backup,返回空态,不清除原 key", () => {
+test("⑥ workspace key 损坏现场 → 备份 corrupt_backup,返回空态,不清除原 key", () => {
   const corruptRaw = "{ 这不是有效 JSON";
   store.set(WORKSPACE_KEY, corruptRaw);
 
@@ -141,7 +141,7 @@ test("⑥ v5 损坏现场 → 备份 corrupt_backup,返回空态,不清除原 ke
   assert.ok(store.has(WORKSPACE_KEY));
 });
 
-test("⑦ saveWorkspace 写入 v5 并携带 storageVersion", () => {
+test("⑦ saveWorkspace 写入 workspace key 并携带 storageVersion", () => {
   const ok = saveWorkspace({ exam: { examName: "保存测试" }, subjects: [] });
   assert.equal(ok, true);
   const saved = JSON.parse(store.get(WORKSPACE_KEY)!);
@@ -164,11 +164,11 @@ test("⑧ saveWorkspace 写失败 → 返回 false（不覆盖已有数据）", 
 });
 
 test("⑨ saveWorkspace 版本守卫：磁盘为更高版本 → 拒写（与读侧对称，防降级覆盖）", () => {
-  // 模拟未来版本 v6 数据已存在
+  // 模拟未来版本（当前版本 + 1）数据已存在
   const futureData = { storageVersion: STORAGE_VERSION + 1, exam: { examName: "未来版本数据" }, onboardingCompleted: true };
   store.set(WORKSPACE_KEY, JSON.stringify(futureData));
 
-  // 旧构建尝试自动保存 v5 → 应被拒写
+  // 旧构建尝试自动保存当前版本 → 应被拒写
   const ok = saveWorkspace({ exam: { examName: "旧构建不应覆盖" }, onboardingCompleted: false });
   assert.equal(ok, false, "磁盘版本高于当前时应拒写");
 
@@ -179,8 +179,8 @@ test("⑨ saveWorkspace 版本守卫：磁盘为更高版本 → 拒写（与读
   assert.equal(after.onboardingCompleted, true, "onboardingCompleted 不应被旧构建重置为 false");
 });
 
-test("⑩ saveWorkspace 版本守卫：磁盘 v5 损坏 → 允许覆盖重建（不因损坏误拒写）", () => {
-  // v5 key 存在但 JSON 损坏（hydrate 会备份；save 不应因此拒写否则用户无法恢复）
+test("⑩ saveWorkspace 版本守卫：磁盘 workspace key 损坏 → 允许覆盖重建（不因损坏误拒写）", () => {
+  // workspace key 存在但 JSON 损坏（hydrate 会备份；save 不应因此拒写否则用户无法恢复）
   store.set(WORKSPACE_KEY, "{ 这不是有效 JSON");
 
   const ok = saveWorkspace({ exam: { examName: "重建数据" } });

@@ -4,7 +4,7 @@
  * Storage Contract（Stabilization 1C-1 实现）
  *
  * 依据 docs/STORAGE_CONTRACT.md 设计：
- *   - 单一 workspace key：`nest-exam-workspace-v5`，内部携带 storageVersion=5
+ *   - 单一 workspace key：`nest-exam-workspace-v5`，内部携带 storageVersion（v6 起含 materials/sections）
  *   - 唯一 Owner：storage.ts 提供 hydrateWorkspace / saveWorkspace / migrateWorkspace
  *   - page.tsx 不再直写 localStorage，统一经本模块读写
  *   - 迁移：以 v3 为业务数据基座，用 v4 补充 Memory Engine 字段；v3/v4 原样保留可回滚
@@ -17,8 +17,8 @@
  */
 
 /** 当前契约版本（新 key 内部携带；未来升级走 migration 表，不用大量 if） */
-export const STORAGE_VERSION = 5;
-/** 唯一 workspace key（v5 新契约） */
+export const STORAGE_VERSION = 6;
+/** 唯一 workspace key（兼容 v5 key 名；内部 storageVersion 已升级到 6） */
 export const WORKSPACE_KEY = "nest-exam-workspace-v5";
 /** 旧 v3 业务数据 key（迁移源） */
 export const LEGACY_KEY_V3 = "nest-exam-workspace-v3";
@@ -28,6 +28,7 @@ export const LEGACY_KEY_V4 = "nest-exam-workspace-v4";
 export const CORRUPT_BACKUP_KEY = "nest-exam-workspace-v5.corrupt_backup";
 /** v3/v4 迁移后留下的时间戳标记 key */
 const MIGRATED_AT_KEY = "__migratedAt";
+const UI_STATE_KEY_PREFIX = "nest-exam-ui:";
 
 export type WorkspaceSnapshot = {
   storageVersion?: number;
@@ -53,6 +54,20 @@ function writeRaw(key: string, value: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+export function saveUiState(key: string, value: unknown): boolean {
+  return writeRaw(`${UI_STATE_KEY_PREFIX}${key}`, value);
+}
+
+function mirrorWorkspaceToD1(snapshot: WorkspaceSnapshot) {
+  if (typeof fetch !== "function") return;
+  void fetch("/api/workspace", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(snapshot),
+    keepalive: true,
+  }).catch(() => {});
 }
 
 /**
@@ -156,5 +171,7 @@ export function saveWorkspace(snapshot: Omit<WorkspaceSnapshot, "storageVersion"
     ...snapshot,
     storageVersion: STORAGE_VERSION,
   };
-  return writeRaw(WORKSPACE_KEY, withVersion);
+  const ok = writeRaw(WORKSPACE_KEY, withVersion);
+  if (ok) mirrorWorkspaceToD1(withVersion);
+  return ok;
 }

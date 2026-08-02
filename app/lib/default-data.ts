@@ -1,4 +1,5 @@
 import type { ExamGoal, Subject, Task, StudyDay, GrowthCard, CardDeck, CardCategory, Resource, Question, KnowledgeNode, Note, Annotation, AppSettings } from "./types";
+import { resourceToMaterial, resourceToMaterialSections } from "./types";
 
 // Static seed data - use FIXED dates to avoid hydration mismatch between server and client
 // These are placeholder dates for initial seed data only.
@@ -129,6 +130,8 @@ export const seedResources: Resource[] = [
 export const seedQuestions: Question[] = [
   {
     id: "q-1",
+    materialId: "r-2",
+    sectionId: "r-2-section-2025",
     subject: "828 物理化学",
     school: "哈工大",
     year: "2025",
@@ -154,6 +157,8 @@ export const seedQuestions: Question[] = [
   },
   {
     id: "q-2",
+    materialId: "r-2",
+    sectionId: "r-2-section-2023",
     subject: "828 物理化学",
     school: "哈工大",
     year: "2023",
@@ -178,6 +183,12 @@ export const seedQuestions: Question[] = [
     favorite: false,
   },
 ];
+
+export const seedMaterials = seedResources.map((resource) => resourceToMaterial(
+  resource,
+  seedSubjects.find((subject) => subject.name === resource.subject)?.id ?? resource.subject,
+));
+export const seedMaterialSections = seedResources.flatMap((resource) => resourceToMaterialSections(resource, seedQuestions));
 
 export const seedNodes: KnowledgeNode[] = [
   {

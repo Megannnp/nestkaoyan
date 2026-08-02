@@ -7,12 +7,13 @@ import type {
   ExamGoal, Resource, Question, KnowledgeNode, Task,
   PendingItem, Review, PlanLog, StudyDay,
   GrowthCard, Annotation, AgentStep, StudyDraft, AgentMessage, ChatSession, CardCategory,
-  StructuredReview
+  StructuredReview, Material, MaterialSection
 } from "./lib/types";
+import { resourceToMaterial, resourceToMaterialSections } from "./lib/types";
 import {
   seedExam, seedSubjects, seedResources, seedQuestions, seedNodes,
   seedTasks, seedNotes, seedCards, seedAnnotations, seedAppSettings,
-  seedStudyDays, seedCardCategories
+  seedStudyDays, seedCardCategories, seedMaterials, seedMaterialSections
 } from "./lib/default-data";
 import { TASK, TOAST_DURATION, MAX_STUDY_DAYS, MAX_DATE_RANGE_DAYS } from "./lib/rules";
 import { savePdfFile, deletePdfFile } from "./lib/pdf-storage";
@@ -30,55 +31,16 @@ import { ReaderPanel } from "./components/ReaderPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { OnboardingWizard, type OnboardingResult } from "./components/OnboardingWizard";
 import { analyzeExam, analyzeErrorReason } from "./lib/ai/analyze-exam";
+import { analyzeMistakes, mistakesErrorReason } from "./lib/ai/analyze-mistakes";
+import { generatePlan as generateTodayPlan, planErrorReason } from "./lib/ai/plan-generate";
 import { ChatPanel } from "./components/ChatPanel";
+import { buildMaterialBundle, buildPlaceholderQuestionsForPastPaper, extractQuestionKeyword } from "./lib/materials";
+import { makeId, today, dateOnly, normalizeExamGoal, dateRange, formatMessageTime } from "./lib/utils";
 
 const quickPrompts = ["今天学什么", "找近五年化学势真题", "傅献彩哪里讲这个", "为什么总错这类题", "把今天整理成笔记", "分析最近三套真题，更新图谱并重排计划", "我现在属于第几轮"];
 const masteryOptions: MasteryText[] = ["完全不懂", "有些模糊", "基本理解", "能够讲清", "能够迁移"];
 const moodOptions: StudyMood[] = ["较差", "一般", "正常", "较好", "很好"];
 const coreNames = ["热力学", "相平衡", "化学动力学", "电化学", "统计热力学", "表面与胶体", "实验与综合"];
-// UX Sprint: 消息时间格式化（当天 HH:mm；非当天 M月D日 HH:mm；跨年 YYYY年M月D日 HH:mm）
-function formatMessageTime(iso: string | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const now = new Date();
-  const sameYear = d.getFullYear() === now.getFullYear();
-  const sameDay = sameYear && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  if (sameDay) return `${hh}:${mm}`;
-  if (sameYear) return `${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`;
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`;
-}
-
-let _idCounter = 0;
-function makeId(prefix: string) {
-  _idCounter++;
-  return `${prefix}-${Date.now()}-${_idCounter}-${Math.random().toString(16).slice(2)}`;
-}
-function today() {
-  return new Date().toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" });
-}
-function dateOnly(offsetDays = 0) {
-  const date = new Date();
-  date.setDate(date.getDate() + offsetDays);
-  // 统一按 Asia/Shanghai 计算“日期”，与 today() 保持一致（en-CA 输出 YYYY-MM-DD）
-  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
-}
-function normalizeExamGoal(goal: ExamGoal): ExamGoal {
-  return { ...seedExam, ...goal, startDate: goal.startDate ?? seedExam.startDate ?? "2026-07-30" };
-}
-function dateRange(start: string, end: string) {
-  const startTime = new Date(start).getTime();
-  const endTime = new Date(end).getTime();
-  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime > endTime) return [dateOnly()];
-  const days = Math.min(MAX_DATE_RANGE_DAYS, Math.floor((endTime - startTime) / 86400000) + 1);
-  return Array.from({ length: days }, (_, index) => {
-    const date = new Date(startTime);
-    date.setDate(date.getDate() + index);
-    return date.toISOString().slice(0, 10);
-  });
-}
 
 export default function Home() {
   const [activeView, setActiveView] = useState<WorkspaceView>("dashboard");
@@ -94,6 +56,7 @@ export default function Home() {
   // onboardingCompleted 持久化；bootChecked 仅客户端，用于判定是否新用户（避免 SSR 闪现）
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const [bootChecked, setBootChecked] = useState(false);
+  const [appReady, setAppReady] = useState(false);
   // ─── Dashboard: Hydration-safe date (SSR: fixed; mount: real) ───
   // 必须在派生值（dueCards 等）之前声明，否则 TDZ ReferenceError
   const [hydratedTodayStr, setHydratedTodayStr] = useState("2026-07-30");
@@ -104,6 +67,8 @@ export default function Home() {
   const [activeKnowledgeSubject, setActiveKnowledgeSubject] = useState(seedSubjects[0]?.name ?? "");
   const [activeCardSubject, setActiveCardSubject] = useState(seedSubjects[0]?.name ?? "");
   const [resources, setResources] = useState(seedResources);
+  const [materials, setMaterials] = useState<Material[]>(seedMaterials);
+  const [materialSections, setMaterialSections] = useState<MaterialSection[]>(seedMaterialSections);
   const [questions, setQuestions] = useState(seedQuestions);
   const [nodes, setNodes] = useState(seedNodes);
   const [tasks, setTasks] = useState(seedTasks);
@@ -122,6 +87,8 @@ export default function Home() {
   const [readerPage, setReaderPage] = useState(seedResources[0]?.currentPage ?? "");
   const [readerZoom, setReaderZoom] = useState("100%");
   const [resourceView, setResourceView] = useState<"grid" | "list">("grid");
+  /** 资料库两态（2026-08-01）：false=书架页（管理与选择）；true=阅读页（Reader + 批注 + AI 学习） */
+  const [readingMode, setReadingMode] = useState(false);
   const [fileUploadState, setFileUploadState] = useState<{
     name: string;
     size: number;
@@ -132,18 +99,26 @@ export default function Home() {
   const [studyDays, setStudyDays] = useState<StudyDay[]>(seedStudyDays);
   const [learningEvents, setLearningEvents] = useState<LearningEvent[]>([]);
   const [focusMode, setFocusMode] = useState(false);
-  const [cardMode] = useState("背诵");
+  const [cardMode, setCardMode] = useState("背诵");
   const [cardIndex, setCardIndex] = useState(0);
   const [cardFlipped, setCardFlipped] = useState(false);
   // 编辑卡片弹窗当前编辑的卡片 id（null = 新建）
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   // 正在编辑的卡片（仅编辑弹窗使用；避免卡片列表变化时闪动）
   const editingCard = editingCardId ? cards.find((c) => c.id === editingCardId) ?? null : null;
+  const [cardDialogSubject, setCardDialogSubject] = useState(seedSubjects[0]?.name ?? "");
+  const [cardDialogCategory, setCardDialogCategory] = useState("");
   // ─── 卡片中心：卡片组作为一级工作空间（成长卡片 → 卡片组 → 卡片）───
   // null = 成长卡片首页（仅管理/展示卡片组）；有值 = 卡片组学习空间
   const [cardSubjectView, setCardSubjectView] = useState<string | null>(null);
-  // 卡片组学习空间内子视图：待复习 / 全部 / 按七核 / 按掌握状态（统计/筛选/翻卡全部在卡片组内完成）
-  const [cardSubView, setCardSubView] = useState<"待复习" | "全部" | "按七核" | "按掌握状态">("待复习");
+  // ─── 信息架构（2026-08-01 用户反馈）：拆分为【状态筛选】×【分组方式】两个独立维度 ───
+  // 状态（回答「看哪些」）：待复习 / 全部 / 收藏
+  const [cardFilter, setCardFilter] = useState<"待复习" | "全部" | "收藏">("待复习");
+  // 分组（回答「怎么组织」）：按七核（默认，产品核心逻辑）/ 按掌握度 / 按时间
+  const [cardGroupBy, setCardGroupBy] = useState<"按七核" | "按掌握度" | "按时间">("按七核");
+  /** 兼容旧引用：导出当前筛选态（`cardSubView === "待复习"` → 待复习；否则全部） */
+  const cardSubView = cardFilter;
+  const setCardSubView = setCardFilter;
   // ─── 卡片组管理：⋯ 菜单（null=关闭；id=打开；同一时间只开一个）───
   const [cardMenuOpenId, setCardMenuOpenId] = useState<string | null>(null);
   // 重命名编辑态：正在重命名的卡片组 id（null=非编辑态）
@@ -188,9 +163,28 @@ export default function Home() {
   const [chatHistoryOpen, setChatHistoryOpen] = useState(false);
   // UX Sprint P0: 同步最新 activeSessionId（避免 React 批处理导致「新建对话后立即发送」读到旧值）
   const activeSessionIdRef = useRef("");
+  const resourcesRef = useRef(resources);
+  const materialAnalysisRunRef = useRef(0);
+  const materialAnalysisTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const uploadProgressRunRef = useRef(0);
+  const uploadProgressTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const memoryEngineWarningShownRef = useRef(false);
   // 当前激活会话（无会话时返回 null，ChatPanel 显示欢迎界面）
   const activeChatSession = chatSessions.find((s) => s.id === activeSessionId) ?? null;
   const activeChatMessages = activeChatSession?.messages ?? [];
+
+  useEffect(() => {
+    resourcesRef.current = resources;
+  }, [resources]);
+
+  useEffect(() => () => {
+    materialAnalysisTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    materialAnalysisTimeoutsRef.current = [];
+    uploadProgressTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    uploadProgressTimeoutsRef.current = [];
+    materialAnalysisRunRef.current += 1;
+    uploadProgressRunRef.current += 1;
+  }, []);
 
   // --- Derived / computed values ---
   const reviewSubjects = ["全部科目", ...subjects.map((s) => s.name)];
@@ -203,20 +197,14 @@ export default function Home() {
   const reviewAiSummary = `今日完成 ${reviewCompletedTasks} 个任务，掌握度变化 ${Math.round(reviewMasteryDelta)}%。`;
   const subjectCards = cards.filter((card) => card.subject === activeCardSubject);
   const dueCards = subjectCards.filter((card) => card.mastery === "不会" || card.mastery === "模糊" || card.lastReviewed === "未复习" || !card.nextReviewAt || card.nextReviewAt <= hydratedTodayStr);
-  const reviewedTodayCards = subjectCards.filter((card) => card.lastReviewed !== "未复习" && card.lastReviewed.slice(0, 10) === hydratedTodayStr);
   const cardQueue = dueCards.length ? dueCards : subjectCards;
-  // UX Sprint: 卡片中心学科 Tab 分组统计（当前学科待复习/全部/今日已复习）
-  const subjectCardStats = subjects.map((subject) => {
-    const subjectCardList = cards.filter((card) => card.subject === subject.name);
-    const due = subjectCardList.filter((card) => card.mastery === "不会" || card.mastery === "模糊" || card.lastReviewed === "未复习" || !card.nextReviewAt || card.nextReviewAt <= hydratedTodayStr);
-    const reviewedToday = subjectCardList.filter((card) => card.lastReviewed !== "未复习" && card.lastReviewed.slice(0, 10) === hydratedTodayStr);
-    return { subject, total: subjectCardList.length, due: due.length, reviewedToday: reviewedToday.length };
-  });
   // UX Sprint: 当前学科的自定义分类（只显示当前学科，隔离其他学科分类）
   const subjectCategories = categories.filter((cat) => {
     const subject = subjects.find((s) => s.name === activeCardSubject);
     return subject ? cat.subjectId === subject.id : false;
   });
+  const cardDialogSubjectRecord = subjects.find((s) => s.name === cardDialogSubject);
+  const cardDialogSubjectCategories = categories.filter((cat) => cardDialogSubjectRecord ? cat.subjectId === cardDialogSubjectRecord.id : false);
   // 分类概览统计（卡片数量 + 待复习数量）
   const categoryStats = subjectCategories.map((cat) => {
     const catCards = cards.filter((c) => c.subject === activeCardSubject && c.categoryId === cat.id);
@@ -233,6 +221,7 @@ export default function Home() {
       ? "全部卡片"
       : subjectCategories.find((c) => c.id === activeCardCategory)?.name ?? "未分类"
     : "";
+
   // 当前学科进入某卡片组后的卡片列表（未分类 → 无 categoryId；真实分类 → 匹配 categoryId；全部卡片 → 该学科全部）
   const currentCategoryCards = activeCardCategory
     ? activeCardCategory === UNCATEGORIZED
@@ -241,6 +230,9 @@ export default function Home() {
         ? cards.filter((c) => c.subject === activeCardSubject)
         : cards.filter((c) => c.subject === activeCardSubject && c.categoryId === activeCardCategory)
     : [];
+  const visibleCategoryCards = cardFilter === "收藏"
+    ? currentCategoryCards.filter((card) => card.favorite)
+    : currentCategoryCards;
   const uncategorizedCardCount = uncategorizedCards.length;
   // 进入卡片组后只在该卡片组范围内复习（待复习优先）
   const categoryQueueCards = currentCategoryCards.filter((c) => c.mastery === "不会" || c.mastery === "模糊" || c.lastReviewed === "未复习" || !c.nextReviewAt || c.nextReviewAt <= hydratedTodayStr);
@@ -250,7 +242,6 @@ export default function Home() {
   const activeGroupCard = categoryReviewQueue[categoryClampedCardIndex] ?? null;
   // 队列变化时把 index 夹在有效范围内（派生值，避免在 effect 里 setState 造成级联渲染）
   const clampedCardIndex = Math.min(Math.max(cardIndex, 0), Math.max(cardQueue.length - 1, 0));
-  const activeCard = cardQueue[clampedCardIndex];
   const subjectResources = resources.filter((resource) => resource.subject === activeKnowledgeSubject);
   // UX Sprint（学科隔离）: activeResource 只在当前学科资源内查找，禁止跨学科回退到其他科目
   const activeResource = subjectResources.find((resource) => resource.id === activeResourceId) ?? subjectResources[0] ?? null;
@@ -259,8 +250,9 @@ export default function Home() {
   const subjectAnnotations = annotations.filter((annotation) => subjectResources.some((resource) => resource.id === annotation.resourceId));
   const relatedQuestions = questions.filter((question) => activeResource && question.subject === activeResource.subject && (activeResource.linkedNode.includes(question.core) || activeResource.linkedNode.includes(question.branch)));
   // UX Sprint（学科隔离）: 真题查询默认锁定当前学科，不允许跨学科展示
+  const effectiveQuestionSubject = questionFilter.subject === "全部" ? activeKnowledgeSubject : questionFilter.subject;
   const filteredQuestions = questions.filter((question) => {
-    const bySubject = question.subject === activeKnowledgeSubject;
+    const bySubject = question.subject === effectiveQuestionSubject;
     const byCore = questionFilter.core === "全部" || question.core === questionFilter.core;
     const byResult = questionFilter.result === "全部" || question.result === questionFilter.result;
     const byKeyword = !questionFilter.keyword || `${question.stem}${question.knowledge}${question.year}`.includes(questionFilter.keyword);
@@ -301,6 +293,13 @@ export default function Home() {
   function onCellMouseLeave() {
     setTooltipVisible(false);
   }
+  function onCellClick(event: ReactMouseEvent<Element>, date: string) {
+    onCellMouseEnter(event, date);
+    setActiveView("dashboard");
+    setActiveDashboardPanel("review");
+    const day = studyDays.find((item) => item.date === date);
+    setNotice(day ? `已打开 ${date} 的复盘记录` : `${date} 暂无学习记录`);
+  }
 
   // ─── Dashboard: Hydration effect ───
   // 挂载后把 SSR 占位替换为真实日期/倒计时（标准 hydration 模式，需在 effect 内 setState）
@@ -320,7 +319,8 @@ export default function Home() {
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
     const summary = computeReplayComparison(learningEvents, nodes);
-    if (summary.warnings > 0) {
+    if (summary.warnings > 0 && !memoryEngineWarningShownRef.current) {
+      memoryEngineWarningShownRef.current = true;
       console.warn(`[MemoryEngine] ${summary.warnings} 个节点投影与当前状态存在差异（Sprint 2A 观察期，不影响 UI）`);
     }
     // Sprint 2B-1: Legacy vs Projected Dashboard Progress 对照
@@ -341,7 +341,10 @@ export default function Home() {
   useEffect(() => {
     const data = hydrateWorkspace();
     setBootChecked(true);
-    if (!data) return; // 无任何存档 → 新用户，onboardingCompleted 保持 false → 显示初始化向导
+    if (!data) {
+      requestAnimationFrame(() => requestAnimationFrame(() => setAppReady(true)));
+      return; // 无任何存档 → 新用户，onboardingCompleted 保持 false → 显示初始化向导
+    }
     try {
       // 老用户（已有存档但无该字段）默认视为已完成，不再弹向导
       setOnboardingCompleted((data.onboardingCompleted as boolean | undefined) ?? true);
@@ -351,6 +354,19 @@ export default function Home() {
       if (data.activeKnowledgeSubject) setActiveKnowledgeSubject(data.activeKnowledgeSubject);
       if (data.activeCardSubject) setActiveCardSubject(data.activeCardSubject);
       if (data.resources) setResources(data.resources);
+      if (data.materials && Array.isArray(data.materials)) {
+        setMaterials(data.materials);
+      } else if (data.resources && Array.isArray(data.resources)) {
+        setMaterials((data.resources as Resource[]).map((resource) => resourceToMaterial(
+          resource,
+          (data.subjects as typeof subjects | undefined)?.find((subject) => subject.name === resource.subject)?.id ?? resource.subject,
+        )));
+      }
+      if (data.materialSections && Array.isArray(data.materialSections)) {
+        setMaterialSections(data.materialSections);
+      } else if (data.resources && Array.isArray(data.resources)) {
+        setMaterialSections((data.resources as Resource[]).flatMap((resource) => resourceToMaterialSections(resource, (data.questions as Question[] | undefined) ?? [])));
+      }
       if (data.questions) setQuestions(data.questions);
       if (data.nodes) setNodes(data.nodes);
       if (data.tasks) setTasks(data.tasks);
@@ -369,8 +385,10 @@ export default function Home() {
       if (data.logs) setLogs(data.logs);
       // UX Sprint P0: 兼容历史数据（旧 chat 数组）→ 迁移为单一 ChatSession（不丢失历史）
       if (data.chatSessions && Array.isArray(data.chatSessions) && data.chatSessions.length > 0) {
+        const restoredSessionId = data.activeSessionId || data.chatSessions[0].id;
         setChatSessions(data.chatSessions);
-        setActiveSessionId(data.activeSessionId || data.chatSessions[0].id);
+        setActiveSessionId(restoredSessionId);
+        activeSessionIdRef.current = restoredSessionId;
       } else if (data.chat) {
         const migratedChat = (data.chat as unknown[]).map((item, index) => {
           const m = item as { id?: string; role?: string; text?: string; content?: string; createdAt?: string; updatedAt?: string; messageType?: string };
@@ -391,6 +409,7 @@ export default function Home() {
         };
         setChatSessions([legacySession]);
         setActiveSessionId(legacySession.id);
+        activeSessionIdRef.current = legacySession.id;
       }
       // Stabilization 1B-1: 恢复已保存的复盘（刷新后再打开 ReviewDialog 可见）
       if (data.review) setReview(data.review);
@@ -414,6 +433,8 @@ export default function Home() {
     } catch (err) {
       // hydrateWorkspace 已在内部备份损坏原始串；此处仅记录，不清除任何 key
       console.error("[Storage] hydrate 失败", err);
+    } finally {
+      requestAnimationFrame(() => requestAnimationFrame(() => setAppReady(true)));
     }
     // 仅在挂载时从 localStorage 恢复一次；runTimerFrom 为稳定语义，无需列入依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -424,9 +445,10 @@ export default function Home() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const latestSnapshotRef = useRef<string>("");
   useEffect(() => {
+    if (!appReady) return;
     latestSnapshotRef.current = JSON.stringify({
       exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
-      resources, questions, nodes, tasks, pending, notes, cards, annotations,
+      resources, materials, materialSections, questions, nodes, tasks, pending, notes, cards, annotations,
       activeResourceId, readerSearch, readerPage, readerZoom,
       studyDays, agentSteps, logs, chatSessions, activeSessionId, review, structuredReviews, studyDraft, cardCategories: categories,
       onboardingCompleted,
@@ -439,11 +461,11 @@ export default function Home() {
       if (!ok) console.warn("[Storage] 写入失败（可能配额已满），数据保留在内存中");
     }, 400);
   }, [exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
-      resources, questions, nodes, tasks, pending, notes, cards, annotations,
+      resources, materials, materialSections, questions, nodes, tasks, pending, notes, cards, annotations,
       activeResourceId, readerSearch, readerPage, readerZoom,
       studyDays, agentSteps, logs, chatSessions, activeSessionId, review, structuredReviews, studyDraft, categories,
       onboardingCompleted,
-      activeTimerTaskId, timerStartTime, timerAccumSeconds, timerRunStartEpoch]);
+      activeTimerTaskId, timerStartTime, timerAccumSeconds, timerRunStartEpoch, appReady]);
 
   // 卸载 / 切后台时立即落盘，避免防抖窗口内的改动丢失
   useEffect(() => {
@@ -474,6 +496,11 @@ export default function Home() {
   // ─── P4 Phase 1: 提交复盘 → 由规则引擎解析并追加到历史记录 ───
   // 使用 memory-rules 的 extractReviewFields（与记忆引擎同一套离线规则）生成结构化字段
   const handleReviewSubmit = () => {
+    // P2 交互修复（深入审查 2026-08-01）：无内容时不产生空复盘记录
+    if (!review.done.trim() && !review.hard.trim()) {
+      setNotice("请至少填写「完成了什么」或「最困难的部分」");
+      return;
+    }
     const parsed = extractReviewFields({
       done: review.done,
       hard: review.hard,
@@ -656,6 +683,61 @@ export default function Home() {
     setNotice(`已恢复：${backup.label}`);
   }
 
+  // ─── 数据导出（PRD 3.5 JSON 备份）───
+  function handleExportData() {
+    try {
+      const snapshot = {
+        exportedAt: new Date().toISOString(),
+        appName: "筑巢考研工作台",
+        storageVersion: 6,
+        exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
+        resources, materials, materialSections, questions, nodes, tasks, pending, notes, cards,
+        annotations, studyDays, agentSteps, logs, chatSessions, activeSessionId, review, structuredReviews,
+        cardCategories: categories,
+      };
+      const json = JSON.stringify(snapshot, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `kaoyan-workspace-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setNotice("已导出完整数据备份 (JSON)");
+    } catch (error) {
+      console.error("[Export] 导出失败", error);
+      setNotice("导出失败，请重试");
+    }
+  }
+
+  // ─── 数据导入（PRD 3.5 JSON 恢复）：写入 localStorage 后刷新，由 mount hydrate 统一恢复 ───
+  async function handleImportData(file: File) {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text) as Record<string, unknown>;
+      if (!data || typeof data !== "object" || !Array.isArray(data.subjects)) {
+        setNotice("导入失败：不是有效的备份文件（缺少 subjects 字段）");
+        return;
+      }
+      const written = saveWorkspace({
+        ...(data as Record<string, unknown>),
+        storageVersion: 6,
+        onboardingCompleted: data.onboardingCompleted ?? true,
+      } as never);
+      if (!written) {
+        setNotice("导入失败：无法写入本地存储（可能磁盘版本更高或配额已满）");
+        return;
+      }
+      setNotice("导入成功，正在刷新恢复数据…");
+      setTimeout(() => window.location.reload(), 600);
+    } catch (error) {
+      console.error("[Import] 导入失败", error);
+      setNotice("导入失败：文件不是有效的 JSON 备份");
+    }
+  }
+
   // ─── Onboarding：完成向导 → 用用户数据整体替换演示种子（清空 828 残留内容）───
   function completeOnboarding(result: OnboardingResult) {
     setExam(normalizeExamGoal(result.exam));
@@ -688,6 +770,11 @@ export default function Home() {
   }
 
   // ─── Knowledge Center handlers ───
+  function selectKnowledgeSubject(subjectName: string) {
+    setActiveKnowledgeSubject(subjectName);
+    setQuestionFilter((prev) => ({ ...prev, subject: "全部" }));
+  }
+
   function inferResource(rawName: string, subjectHint: string) {
     const text = rawName.toLowerCase();
     const matchedSubject = subjects.find((subject) => rawName.includes(subject.name) || rawName.includes(subject.name.replace(/\s/g, "")));
@@ -716,12 +803,74 @@ export default function Home() {
     setNotice(`已打开资料：${resource.name}`);
   }
 
+  function resetUploadProgress() {
+    uploadProgressRunRef.current += 1;
+    uploadProgressTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    uploadProgressTimeoutsRef.current = [];
+    setFileUploadState(null);
+  }
+
+  function openResourceDialog() {
+    resetUploadProgress();
+    setActiveDialog("resource");
+  }
+
+  function closeResourceDialog() {
+    resetUploadProgress();
+    setActiveDialog(null);
+  }
+
+  function startUploadProgress(file: File, inferred: ReturnType<typeof inferResource>) {
+    resetUploadProgress();
+    const runId = uploadProgressRunRef.current;
+    setFileUploadState({ name: file.name, size: file.size, inferred, step: "uploading" });
+    const stages = [
+      ["extracting", 400],
+      ["identifying", 900],
+      ["parsing", 1500],
+      ["mapping", 2100],
+      ["done", 2600],
+    ] as const;
+    stages.forEach(([step, delay]) => {
+      const timeoutId = setTimeout(() => {
+        if (uploadProgressRunRef.current !== runId) return;
+        setFileUploadState((prev) => (prev && prev.name === file.name ? { ...prev, step } : prev));
+      }, delay);
+      uploadProgressTimeoutsRef.current.push(timeoutId);
+    });
+  }
+
+  function upsertMaterialFromResource(resource: Resource) {
+    const { material, sections } = buildMaterialBundle(resource, subjects);
+    setMaterials((items) => [material, ...items.filter((item) => item.id !== material.id)]);
+    setMaterialSections((items) => [...sections, ...items.filter((item) => item.materialId !== resource.id)]);
+    return { material, sections };
+  }
+
+  function addPlaceholderQuestionsForPastPaper(resource: Resource, sections: MaterialSection[]) {
+    const nextQuestions = buildPlaceholderQuestionsForPastPaper(resource, sections, exam, dateOnly(), makeId);
+    if (nextQuestions.length) {
+      setQuestions((items) => [...nextQuestions, ...items]);
+      setMaterialSections((items) => items.map((section) => {
+        const sectionQuestionIds = nextQuestions.filter((question) => question.sectionId === section.id).map((question) => question.id);
+        return sectionQuestionIds.length ? { ...section, questionIds: sectionQuestionIds } : section;
+      }));
+    }
+  }
+
   async function addResource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const file = form.get("file") as File | null;
-    const rawName = String(file?.name || form.get("sourceText") || "").trim();
-    if (!rawName) return;
+    const fileValue = form.get("file");
+    const file = fileValue instanceof File && fileValue.name ? fileValue : null;
+    const isPdfFile = !!file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
+    if (file && !isPdfFile) {
+      pushAssistant("当前仅支持保存 PDF 文件。请转换为 PDF 后再上传。");
+      resetUploadProgress();
+      return;
+    }
+    const fallbackName = `${activeKnowledgeSubject || "未分科"}${activeKnowledgePanel === "questions" ? "空白真题卷" : "空白资料"}-${dateOnly()}`;
+    const rawName = String(file?.name || form.get("sourceText") || fallbackName).trim();
     const inferred = inferResource(rawName, String(form.get("subjectHint") ?? ""));
     const base: Resource = {
       id: makeId("r"),
@@ -743,7 +892,7 @@ export default function Home() {
       createdAt: new Date().toISOString(),
     };
     // Stabilization 1A-1: 真实 PDF 文件 → IndexedDB（绝不写入 localStorage）
-    if (file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"))) {
+    if (file && isPdfFile) {
       try {
         const stored = await savePdfFile(file);
         const resource: Resource = {
@@ -756,19 +905,23 @@ export default function Home() {
         resource.pages = `PDF 文件 · ${(stored.size / 1024).toFixed(1)} KB`;
         // 上传即自动生效：不再进入「待确认」队列，直接可供阅读
         setResources((items) => [resource, ...items]);
+        const { sections } = upsertMaterialFromResource(resource);
+        addPlaceholderQuestionsForPastPaper(resource, sections);
         pushAssistant(`PDF 已保存并可阅读：${resource.name}。`);
       } catch (err) {
         pushAssistant(`PDF 保存失败：${String(err)}`);
-        setActiveDialog(null);
+        closeResourceDialog();
         return;
       }
     } else {
       // 演示/非 PDF 资源：上传即自动生效，不再进入「待确认」队列
       setResources((items) => [base, ...items]);
+      const { sections } = upsertMaterialFromResource(base);
+      addPlaceholderQuestionsForPastPaper(base, sections);
       pushAssistant(`已添加演示/空白资料：${base.name}。`);
     }
     setActiveKnowledgeSubject(inferred.subject);
-    setActiveDialog(null);
+    closeResourceDialog();
   }
 
   // ─── B-1: 待确认队列操作（确认 / 忽略）───
@@ -794,6 +947,9 @@ export default function Home() {
   function deleteResource(item: Resource) {
     setLastDeleted({ collection: "resources", item, label: item.name });
     setResources((items) => items.filter((resource) => resource.id !== item.id));
+    setMaterials((items) => items.filter((material) => material.id !== item.id));
+    setMaterialSections((items) => items.filter((section) => section.materialId !== item.id));
+    setQuestions((items) => items.filter((question) => question.materialId !== item.id));
     // Stabilization 1A-6: 同步清理 IndexedDB 中的 PDF 二进制
     if (item.kind === "pdf" && item.fileStorageKey) {
       deletePdfFile(item.fileStorageKey).catch(() => {});
@@ -832,82 +988,10 @@ export default function Home() {
     setNotice("已删除批注");
   }
 
-  function addQuestion(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const stem = String(form.get("stem") ?? "").trim();
-    if (!stem) return;
-    const question: Question = {
-      id: makeId("q"),
-      // Stabilization 1B-2: 新题默认属于当前激活科目（不再默认 subjects[0]）
-      subject: String(form.get("subject") ?? activeKnowledgeSubject ?? subjects[0]?.name ?? ""),
-      school: String(form.get("school") ?? exam.school),
-      year: String(form.get("year") ?? ""),
-      number: String(form.get("number") ?? ""),
-      type: String(form.get("type") ?? "未知题型"),
-      score: String(form.get("score") ?? ""),
-      stem,
-      answer: String(form.get("answer") ?? ""),
-      originalAnalysis: String(form.get("originalAnalysis") ?? ""),
-      aiAnalysis: "待 AI 补充解析",
-      difficulty: String(form.get("difficulty") ?? "3"),
-      core: String(form.get("core") ?? coreNames[0]),
-      branch: String(form.get("branch") ?? ""),
-      knowledge: String(form.get("knowledge") ?? ""),
-      layer: String(form.get("layer") ?? "第 2 层"),
-      done: false,
-      result: "未做",
-      errorReason: "",
-      note: "",
-      source: "手动录入",
-      confirmed: false,
-      favorite: false,
-    };
-    setQuestions((items) => [question, ...items]);
-    setPending((items) => [{ id: makeId("p"), kind: "真题识别", title: `${question.year} ${question.subject} 第 ${question.number} 题`, subject: question.subject, detail: `建议关联到 ${question.core} / ${question.branch} / ${question.knowledge}`, status: "待确认", targetId: question.id }, ...items]);
-    // Stabilization 1B-2: 跨科目创建 → 明确跳转到该科目；同科目 → 在当前列表立即可见
-    if (question.subject !== activeKnowledgeSubject) {
-      setActiveKnowledgeSubject(question.subject);
-    }
-    pushAssistant(`题目已保存到 ${question.subject}：${question.year} 第 ${question.number} 题`);
-    setActiveDialog(null);
-    event.currentTarget.reset();
-  }
-
   function deleteQuestion(item: Question) {
     setLastDeleted({ collection: "questions", item, label: `${item.year} 第 ${item.number} 题` });
     setQuestions((items) => items.filter((question) => question.id !== item.id));
     setNotice(`已删除真题：${item.year} 第 ${item.number} 题`);
-  }
-
-  function addNode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const knowledge = String(form.get("knowledge") ?? "").trim();
-    if (!knowledge) return;
-    const node: KnowledgeNode = {
-      id: makeId("k"),
-      subject: String(form.get("subject") ?? subjects[0]?.name ?? ""),
-      core: String(form.get("core") ?? coreNames[0]),
-      branch: String(form.get("branch") ?? ""),
-      knowledge,
-      explanation: String(form.get("explanation") ?? ""),
-      prerequisite: String(form.get("prerequisite") ?? ""),
-      related: String(form.get("related") ?? ""),
-      masteryLevel: Number(form.get("masteryLevel") ?? 0),
-      masteryScore: Number(form.get("masteryScore") ?? 0),
-      confidence: "低",
-      round: "第一轮",
-      layer: "第 1 层",
-      mistakes: 0,
-      reviewRisk: "正常",
-      isMonthlyFocus: false,
-    };
-    setNodes((items) => [node, ...items]);
-    setActiveKnowledgeSubject(node.subject);
-    pushAssistant(`已添加知识点：${node.knowledge}（${node.core} / ${node.branch}）`);
-    setActiveDialog(null);
-    event.currentTarget.reset();
   }
 
   function deleteNode(item: KnowledgeNode) {
@@ -930,32 +1014,6 @@ export default function Home() {
     setNotice(`已新建卡片组：${name}`);
   }
 
-  function saveRenameCardInline() {
-    if (!renamingCardId) return;
-    const name = renamingCardName.trim().slice(0, 30);
-    if (!name) { setNotice("名称不能为空"); setRenamingCardId(null); return; }
-    if (subjectCategories.some((c) => c.id !== renamingCardId && c.name === name)) { setNotice("卡片组名称已存在"); return; }
-    setCategories((items) => items.map((c) => c.id === renamingCardId ? { ...c, name, updatedAt: today() } : c));
-    setRenamingCardId(null);
-    setRenamingCardName("");
-    setCardMenuOpenId(null);
-    setNotice(`已重命名为「${name}」`);
-  }
-
-  function confirmDeleteCard() {
-    if (!deletingCardId) return;
-    setCategories((items) => items.filter((c) => c.id !== deletingCardId));
-    // 删除卡片组 → 卡片移入未分类（categoryId 置空），不影响卡片内容
-    setCards((items) => items.map((c) => c.categoryId === deletingCardId ? { ...c, categoryId: undefined } : c));
-    // 若正在该卡片组的学习空间内，删除后返回成长卡片首页
-    if (activeCardCategory === deletingCardId) {
-      setActiveCardCategory(null);
-      setCardSubjectView(null);
-    }
-    setDeletingCardId(null);
-    setCardMenuOpenId(null);
-    setNotice("已删除卡片组，卡片已移入「未分类」");
-  }
   // 卡片移动到当前学科内的其他分类（不能跨学科移动）
   function moveCardToCategory(cardId: string, categoryId: string) {
     setCards((items) => items.map((c) => c.id === cardId
@@ -1012,6 +1070,29 @@ export default function Home() {
   }, [activeView, cardSubjectView, activeCardCategory, cardSubView, activeGroupCard, categoryReviewQueue, cardFlipped]);
 
   // ─── Growth Cards handlers ───
+  function safeCardCategoryForSubject(categoryId: string | undefined, subjectName: string) {
+    if (!categoryId) return "";
+    const subject = subjects.find((item) => item.name === subjectName);
+    return subject && categories.some((cat) => cat.id === categoryId && cat.subjectId === subject.id) ? categoryId : "";
+  }
+
+  function openNewCardDialog() {
+    const subject = activeCardSubject || currentSubject?.name || subjects[0]?.name || "";
+    const candidateCategory = activeCardCategory && activeCardCategory !== ALL_GROUPS && activeCardCategory !== UNCATEGORIZED ? activeCardCategory : "";
+    setEditingCardId(null);
+    setCardDialogSubject(subject);
+    setCardDialogCategory(safeCardCategoryForSubject(candidateCategory, subject));
+    setActiveDialog("card");
+  }
+
+  function openEditCardDialog(card: GrowthCard) {
+    const subject = card.subject || activeCardSubject || subjects[0]?.name || "";
+    setEditingCardId(card.id);
+    setCardDialogSubject(subject);
+    setCardDialogCategory(safeCardCategoryForSubject(card.categoryId, subject));
+    setActiveDialog("card");
+  }
+
   function createCardFromText(createdBy: GrowthCard["createdBy"], text: string, annotation?: Annotation) {
     const card: GrowthCard = {
       id: makeId("c"),
@@ -1097,14 +1178,22 @@ export default function Home() {
   }
 
   function moveTask(id: string, direction: -1 | 1) {
+    const index = tasks.findIndex((task) => task.id === id);
+    const target = index + direction;
+    if (index < 0) return;
+    if (target < 0 || target >= tasks.length) {
+      setNotice(direction < 0 ? "已经是最高优先级" : "已经是最低优先级");
+      return;
+    }
     setTasks((items) => {
-      const index = items.findIndex((task) => task.id === id);
-      const target = index + direction;
-      if (index < 0 || target < 0 || target >= items.length) return items;
+      const currentIndex = items.findIndex((task) => task.id === id);
+      const currentTarget = currentIndex + direction;
+      if (currentIndex < 0 || currentTarget < 0 || currentTarget >= items.length) return items;
       const next = [...items];
-      [next[index], next[target]] = [next[target], next[index]];
+      [next[currentIndex], next[currentTarget]] = [next[currentTarget], next[currentIndex]];
       return next;
     });
+    setNotice(direction < 0 ? "已提高优先级" : "已降低优先级");
   }
 
   function stopTimer() {
@@ -1244,18 +1333,30 @@ export default function Home() {
   function completeTask(id: string) {
     const task = tasks.find((item) => item.id === id);
     if (!task) return;
+    // P1 交互修复（深入审查 2026-08-01）：自定义分钟 / 正确率做输入校验，拒绝空值、非数字、负数、超界
+    // 避免 NaN / 负时长污染 studyDays 与掌握度事件
+    let actualMinutesValue = completionModalAllowEditTime ? completionModalCustomMinutes : (task.actualMinutes || String(Math.max(1, Math.round(elapsedSeconds / 60))));
+    const parsedMinutes = Number(actualMinutesValue);
+    if (!Number.isFinite(parsedMinutes) || parsedMinutes <= 0) {
+      setNotice("实际分钟数无效，已保留自动计算值");
+      actualMinutesValue = String(Math.max(1, Math.round(elapsedSeconds / 60)));
+    } else {
+      actualMinutesValue = String(Math.round(parsedMinutes));
+    }
+    let accuracyNumber = Number(task.accuracy || 0);
+    if (!Number.isFinite(accuracyNumber) || accuracyNumber < 0) accuracyNumber = 0;
+    if (accuracyNumber > 100) accuracyNumber = 100;
     // UX Sprint: 保存并完成才真正生成学习记录 → 清空该任务草稿
     setStudyDraft((prev) => (prev && prev.taskId === id ? null : prev));
-    const actualMinutesValue = completionModalAllowEditTime ? completionModalCustomMinutes : (task.actualMinutes || String(Math.max(1, Math.round(elapsedSeconds / 60))));
     const endTimeStr = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
     updateTask(id, {
       done: true,
       status: "已完成",
       actualMinutes: actualMinutesValue,
+      accuracy: String(accuracyNumber),
       completedAt: endTimeStr,
     });
     recordTaskDone(task, Number(actualMinutesValue || task.minutes || 0));
-    const accuracyNumber = Number(task.accuracy || 0);
     // LearningEvent: study_completed（Sprint 1 / Phase A，纯副作用采集）
     setLearningEvents((prev) => appendLearningEvent(prev, {
       type: "study_completed",
@@ -1324,6 +1425,97 @@ export default function Home() {
     addLog(input, `生成 ${nextTasks.length} 个任务，优先 ${highRiskNode.core} / ${highRiskNode.knowledge}`);
   }
 
+  // Material-First（2026-08-01）：AI 分析一份资料 → 解析章节/题目/知识点/七核
+  // 当前先展示解析链步骤演示；接真模型后替换 result 来源（见 analyze-exam）
+  async function analyzeMaterial(resource: Resource) {
+    if (examAnalyzing) return;
+    materialAnalysisTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    materialAnalysisTimeoutsRef.current = [];
+    const runId = materialAnalysisRunRef.current + 1;
+    materialAnalysisRunRef.current = runId;
+    setExamAnalyzing(true);
+    setActiveResourceId(resource.id);
+    setActiveKnowledgeSubject(resource.subject);
+    setActiveView("knowledge");
+    setActiveKnowledgePanel("resources");
+    // 解析链步骤（Match 用户「AI 分析资料」流程）
+    const steps: AgentStep[] = [
+      "解析资料类型", "识别章节/套卷", "抽取题目", "归纳知识点", "提取高频考点", "形成七核", "更新知识图谱",
+    ].map((title) => ({ id: makeId("a"), title, status: "等待" } as AgentStep));
+    setAgentSteps(steps);
+    pushSystem(`正在 AI 分析资料：${resource.name}…`, "action");
+    steps.forEach((step, i) => {
+      const timeoutId = setTimeout(async () => {
+        if (materialAnalysisRunRef.current !== runId) return;
+        const resourceStillExists = resourcesRef.current.some((item) => item.id === resource.id);
+        if (!resourceStillExists) {
+          if (i === steps.length - 1) setExamAnalyzing(false);
+          return;
+        }
+        setAgentSteps((prev) => prev.map((s) => s.id === step.id ? { ...s, status: "完成" } : s));
+        if (i === steps.length - 1) {
+          const subjectId = subjects.find((subject) => subject.name === resource.subject)?.id ?? resource.subject;
+          const m = resourceToMaterial(resource, subjectId);
+          let aiNodes: KnowledgeNode[] = [];
+          if (resource.type.includes("真题")) {
+            const materialQuestions = questions.filter((question) => question.materialId === resource.id || question.source.includes(resource.name));
+            const result = await analyzeExam(resource.subject, materialQuestions);
+            if (result.ok) {
+              aiNodes = result.nodes
+                .filter((node) => node.knowledge && !nodes.some((existing) => existing.subject === resource.subject && existing.knowledge === node.knowledge))
+                .map((node) => ({
+                  id: makeId("k"),
+                  subject: resource.subject,
+                  core: node.core || "核心考点",
+                  branch: node.branch || "",
+                  knowledge: node.knowledge,
+                  explanation: `AI 正式（DeepSeek）：${node.reason}`.slice(0, 300),
+                  prerequisite: "",
+                  related: resource.name,
+                  masteryLevel: 0,
+                  masteryScore: 20,
+                  confidence: "低",
+                  round: currentSubject?.round || "第一轮",
+                  layer: currentSubject?.layer || "Layer 1",
+                  mistakes: 0,
+                  reviewRisk: "正常",
+                  isMonthlyFocus: false,
+                }));
+              if (aiNodes.length) setNodes((items) => [...aiNodes, ...items]);
+              setNotes((items) => [{
+                id: makeId("n"),
+                title: `资料分析（AI 正式 · DeepSeek）：${resource.name}`,
+                body: `高频核心：${result.cores.map((core) => `${core.name}(${core.frequency})`).join("、") || "—"}`,
+                tags: ["AI正式", "资料分析", resource.subject],
+              }, ...items]);
+            } else {
+              pushSystem(`演示回复（${analyzeErrorReason(result.error)}，资料解析未接真模型）`, "action");
+            }
+          }
+          setResources((items) => items.map((r) => r.id === resource.id ? { ...r, status: "已索引" } : r));
+          setMaterials((items) => items.map((material) => material.id === resource.id
+            ? {
+              ...m,
+              status: "analyzed",
+              analysis: {
+                sectionsCount: materialSections.filter((section) => section.materialId === resource.id).length || 1,
+                questionsCount: questions.filter((question) => question.materialId === resource.id || question.source.includes(resource.name)).length,
+                knowledgePointCount: nodes.filter((node) => node.subject === resource.subject).length + aiNodes.length,
+                coreConcepts: Array.from(new Set([...nodes.filter((node) => node.subject === resource.subject).map((node) => node.core), ...aiNodes.map((node) => node.core)])).slice(0, 8),
+                highFrequencyPoints: Array.from(new Set(questions.filter((question) => question.subject === resource.subject).map((question) => question.knowledge))).filter(Boolean).slice(0, 8),
+                analyzedAt: new Date().toISOString(),
+              },
+            }
+            : material));
+          setMaterialSections((items) => items.map((section) => section.materialId === resource.id ? { ...section, analyzed: true } : section));
+          pushAssistant(`「${resource.name}」AI 分析完成：识别 ${m.type}，生成解析链（章节→题目→知识点→七核）。`, "record");
+          setExamAnalyzing(false);
+        }
+      }, 350 * (i + 1));
+      materialAnalysisTimeoutsRef.current.push(timeoutId);
+    });
+  }
+
   // 真题分析（首个真 AI 意图）：调 DeepSeek 提取高频考点/七核并写入图谱；
   // 无 key / 失败 → 优雅降级到演示逻辑，并明确标注「演示回复」，绝不伪装成真实分析。
   async function runExamAnalysis(subjectName: string) {
@@ -1379,9 +1571,87 @@ export default function Home() {
     }
   }
 
+  // 错因分析（第 2 个真 AI 意图）：取本学科最近的错题 → DeepSeek 归因 + 分层建议；
+  // 无 key / 失败 → 优雅降级到规则回复，并明确标注「演示回复」。
+  async function runMistakeAnalysis(subjectName: string) {
+    const subject = subjectName || currentSubject?.name || "";
+    const mistakes = questions.filter((q) => q.subject === subject && q.result === "错误").slice(0, 12);
+    if (mistakes.length === 0) {
+      pushAssistant(`当前 ${subject || "科目"} 暂无已标记「错误」的真题，可在真题库做题记录中标记错题。`);
+      return;
+    }
+    pushSystem(`正在用 DeepSeek 分析 ${subject || "当前科目"} 的错因…`, "action");
+    const result = await analyzeMistakes(subject, mistakes);
+    if (result.ok && result.mistakes.length > 0) {
+      const lines = result.mistakes.map((m) => `· ${m.reason}：${m.detail}（${m.questionRef}）→ ${m.suggestion}`).join("\n");
+      pushAssistant(`错因分析（AI 正式 · DeepSeek）：${result.summary}\n${lines}`);
+    } else {
+      pushAssistant(`演示回复（${mistakesErrorReason(result.error)}，未接真模型）：近期错题集中在 ${mistakes[0]?.core || "核心考点"} 的适用条件判断，建议先重看条件再专项练习。`);
+    }
+  }
+
   async function runAgentWorkflow(input: string) {
     await runExamAnalysis(currentSubject?.name ?? "");
-    generatePlan(input); // 重排计划仍为演示逻辑（“今日计划真生成”是后续意图）
+    generatePlan(input);
+  }
+
+  // 今日计划真生成（第 3 个真 AI 意图）：DeepSeek 基于知识点/错题/科目时长生成多任务计划；
+  // 无 key / 失败 → 降级到本地 generatePlan，并诚实标注「演示回复」。
+  async function runPlanGeneration() {
+    pushSystem("正在用 DeepSeek 生成今日计划…", "action");
+    const result = await generateTodayPlan(subjects, nodes);
+    if (result.ok && result.tasks.length > 0) {
+      const tasks: Task[] = result.tasks.map((t) => ({
+        id: makeId("t"),
+        title: t.title,
+        subject: t.subject,
+        core: t.core,
+        branch: t.knowledge,
+        round: t.round,
+        layer: t.layer,
+        source: "AI 正式（DeepSeek）",
+        range: "今日重点",
+        minutes: t.minutes,
+        standard: "完成对应练习并能在无提示下讲清核心条件",
+        reason: t.reason,
+        backup: "",
+        done: false, actualMinutes: "", difficulty: "2", mastery: "有些模糊", accuracy: "", needReview: true, mood: "正常", note: "", status: "待开始",
+        aiRecommended: true,
+        aiReasonForgetRate: t.priority === 1 ? "今日最高优先级" : "",
+        aiReasonLayerStable: "",
+        aiReasonMistakeCount: "",
+        aiReasonExamFrequency: "",
+        startedAt: "", estimatedCompletionMinutes: t.minutes,
+        masteryBefore: 0, masteryAfter: 0, completedAt: "",
+        relatedCardIds: [], relatedQuestionIds: [],
+      }));
+      setTasks(tasks);
+      pushAssistant(`今日计划（AI 正式 · DeepSeek）：${result.summary}\n${result.tasks.map((t) => `· ${t.title}（${t.minutes} 分钟）— ${t.reason}`).join("\n")}`);
+    } else {
+      generatePlan("AI 指令：今天学什么");
+      pushAssistant(`演示回复（${planErrorReason(result.error)}，未接真模型）：已按风险知识点生成今日任务。`);
+    }
+  }
+
+  function searchQuestionsFromPrompt(text: string) {
+    const keyword = extractQuestionKeyword(text);
+    const keywordMatched = questions.filter((question) => {
+      const haystack = `${question.year}${question.number}${question.stem}${question.core}${question.branch}${question.knowledge}${question.source}`;
+      return !keyword || haystack.includes(keyword);
+    });
+    const fallbackSubject = activeKnowledgeSubject || currentSubject?.name || subjects[0]?.name || "";
+    const subjectName = keywordMatched[0]?.subject || fallbackSubject;
+    const matched = keywordMatched.filter((question) => question.subject === subjectName);
+    setActiveView("knowledge");
+    setActiveKnowledgeSubject(subjectName);
+    setActiveKnowledgePanel("questions");
+    setQuestionFilter({ subject: subjectName, core: "全部", result: "全部", keyword });
+    if (matched.length > 0) {
+      const summary = matched.slice(0, 3).map((q) => `${q.year} 第 ${q.number} 题：${q.knowledge}`).join("；");
+      pushAssistant(`已检索真题库，找到 ${matched.length} 道相关真题：${summary}`);
+    } else {
+      pushAssistant(`已检索 ${subjectName} 真题库，暂未找到「${keyword || text}」相关题目。`);
+    }
   }
 
   function runPrompt(prompt = chatInput) {
@@ -1394,16 +1664,19 @@ export default function Home() {
       : s));
     setChatInput("");
     if (text.includes("今天") || text.includes("学什么")) {
-      generatePlan("AI 指令：今天学什么");
-      pushAssistant("已按今日风险知识点重新安排计划。");
+      runPlanGeneration();
       return;
     }
     if (text.includes("分析") && text.includes("真题") && (text.includes("更新") || text.includes("重排"))) {
       runAgentWorkflow(text);
       return;
     }
+    if (text.includes("分析") && text.includes("真题")) {
+      runExamAnalysis(currentSubject?.name ?? "");
+      return;
+    }
     if (text.includes("化学势") || (text.includes("真题") && text.includes("找"))) {
-      pushAssistant("这个请求需要调用真题数据库筛选，真题库将在 Knowledge Center 恢复后接通。");
+      searchQuestionsFromPrompt(text);
       return;
     }
     if (text.includes("傅献彩") || text.includes("哪里讲")) {
@@ -1422,7 +1695,7 @@ export default function Home() {
       return;
     }
     if (text.includes("错") || text.includes("不会")) {
-      pushAssistant("近几次错误集中在适用条件判断。规则引擎建议延长第 2 层，不进入第 4 层。");
+      runMistakeAnalysis(currentSubject?.name ?? "");
       return;
     }
     if (text.includes("笔记") || text.includes("总结")) {
@@ -1470,6 +1743,13 @@ export default function Home() {
 
   return (
     <main>
+      {!appReady && (
+        <div
+          aria-label="应用初始化中"
+          className="fixed inset-0 z-[9999] bg-white/30"
+          data-testid="app-loading-guard"
+        />
+      )}
       <Sidebar
         daysLeft={daysLeft} exam={exam} totalTargetScore={totalTargetScore} overallProgress={overallProgress}
         heatmapStartFormatted={heatmapStartFormatted} heatmapMonths={heatmapMonths} dayLabels={dayLabels} heatmapGrid={heatmapGrid}
@@ -1477,11 +1757,11 @@ export default function Home() {
         heatmapDays={heatmapDays} cardsByDate={cardsByDate}
         activeView={activeView} setActiveView={setActiveView}
         heatmapRef={heatmapRef}
-        onCellMouseEnter={onCellMouseEnter} onCellMouseLeave={onCellMouseLeave} onCellClick={onCellMouseEnter}
+        onCellMouseEnter={onCellMouseEnter} onCellMouseLeave={onCellMouseLeave} onCellClick={onCellClick}
         setTooltipVisible={setTooltipVisible} setTooltipData={setTooltipData}
       />
 
-      <div className={styles.mainContent}>
+      <div className={styles.mainContent} data-testid={appReady ? "app-ready" : "app-booting"} aria-busy={!appReady}>
         {/* ─── Dashboard ─── */}
         {activeView === "dashboard" && (
           <div className="flex items-center gap-2 mb-4">
@@ -1541,7 +1821,10 @@ export default function Home() {
                   <div className="section-label">今日学习</div>
                   <h2 className="mb-0">任务与完成记录</h2>
                 </div>
-                <button className="secondary-button shrink-0" onClick={() => generatePlan()}>重新生成今日计划</button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button className="secondary-button" onClick={() => { setActiveView("knowledge"); setActiveKnowledgePanel("resources"); }}>我的资料库</button>
+                  <button className="secondary-button" onClick={() => generatePlan()}>重新生成今日计划</button>
+                </div>
               </div>
               {/* AI 总览 */}
               <div className="mt-4 p-4 rounded-[8px] bg-[#F4F4F5]">
@@ -1605,10 +1888,11 @@ export default function Home() {
                             <span className="font-bold text-[#18181B]">{Math.floor(elapsedSeconds / 60)} 分钟 {elapsedSeconds % 60} 秒</span>
                             <span className="text-[#A1A1AA]">| 预计 {task.estimatedCompletionMinutes || task.minutes} 分钟</span>
                           </div>
-                          <div className="h-1.5 rounded-full bg-[#D4D4D8] overflow-hidden mt-1.5">
-                            <div className="h-full rounded-full bg-[#0F766E] transition-all duration-500"
-                              style={{ width: `${Math.min(100, (elapsedSeconds / 60) / (task.estimatedCompletionMinutes || task.minutes) * 100)}%` }} />
-                          </div>
+                          <progress
+                            className={`${styles.progressBar} mt-1.5`}
+                            value={Math.min(100, (elapsedSeconds / 60) / (task.estimatedCompletionMinutes || task.minutes) * 100)}
+                            max={100}
+                          />
                           <div className="flex items-center justify-between text-[11px] text-[#71717A] mt-0.5">
                             <span>{Math.floor(elapsedSeconds / 60)} / {task.estimatedCompletionMinutes || task.minutes} min</span>
                             <span>剩余 {Math.max(0, (task.estimatedCompletionMinutes || task.minutes) - Math.floor(elapsedSeconds / 60))} 分钟</span>
@@ -1681,9 +1965,6 @@ export default function Home() {
             <ChatPanel
               sessions={chatSessions}
               activeSessionId={activeSessionId || chatSessions[0]?.id || ""}
-              currentSubject={activeCardSubject || currentSubject?.name || ""}
-              currentResource={activeResource?.name || ""}
-              currentPage={activeResource?.currentPage || ""}
               onSelectSession={(id) => { setActiveSessionId(id); activeSessionIdRef.current = id; }}
               onNewSession={newChatSession}
               onSend={(content) => runPrompt(content)}
@@ -1692,9 +1973,10 @@ export default function Home() {
                 setNotice("已重命名会话");
               }}
               onDeleteSession={(id) => {
-                setChatSessions((items) => items.filter((s) => s.id !== id));
-                if (activeSessionId === id) {
-                  const next = chatSessions.find((s) => s.id !== id) ?? null;
+                const remainingSessions = chatSessions.filter((s) => s.id !== id);
+                setChatSessions(remainingSessions);
+                if (activeSessionIdRef.current === id) {
+                  const next = remainingSessions[0] ?? null;
                   setActiveSessionId(next?.id ?? "");
                   activeSessionIdRef.current = next?.id ?? "";
                 }
@@ -1749,7 +2031,7 @@ export default function Home() {
                           ? "bg-[#18181B] text-white"
                           : "bg-[#F4F4F5] text-[#18181B]"
                       }`}
-                      onClick={() => setActiveKnowledgeSubject(subject.name)}
+                      onClick={() => selectKnowledgeSubject(subject.name)}
                     >
                       {subject.name}
                     </button>
@@ -1775,47 +2057,61 @@ export default function Home() {
               </div>
             )}
 
-            {/* 非 landing：面包屑返回 */}
+            {/* 非 landing：返回按钮统一放在各面板右侧操作区（与成长卡片一致） */}
             {activeKnowledgePanel !== "landing" && (
               <div>
-                <div className="flex items-center gap-3 mb-4">
-                  <button className="text-[12px] text-[#71717A] hover:text-[#18181B]" onClick={() => setActiveKnowledgePanel("landing")}>← 返回资源总览</button>
-                  <div className="flex-1" />
-                </div>
 
-                {/* Resources */}
+                {/* Resources — 两态：书架页（极简管理与选择）⇄ 阅读页（Reader + 批注 + AI 学习） */}
                 {activeKnowledgePanel === "resources" && (
-                  <div>
-                    <div className="section-heading compact-heading">
-                      <div><div className="section-label">AI First</div><h2>学习资源库</h2><p className="section-hint">上传并识别，AI识别结果进入待确认队列。</p></div>
-                      <button className="secondary-button" onClick={() => setActiveDialog("resource")}>上传资源</button>
+              <div>
+                {readingMode && (
+                  <div className="section-heading compact-heading">
+                    <div>
+                      <div className="section-label">Reader</div>
+                      <h2 className="truncate">{activeResource?.name || "资料"}</h2>
                     </div>
+                    <div className="flex items-center gap-3 shrink-0 flex-wrap">
+                      <button
+                        className="min-h-[32px] px-3 rounded-[8px] bg-white border border-[#D4D4D8] text-[#18181B] font-bold text-[13px] hover:bg-[#F4F4F5] transition-colors"
+                        onClick={() => setReadingMode(false)}
+                      >← 返回</button>
+                    </div>
+                  </div>
+                )}
+                {!readingMode ? (
+                <div>
+                <div className="section-heading compact-heading">
+                  <div><div className="section-label">Material Library</div><h2>我的资料库</h2><p className="section-hint">导入一本教材/一套真题/一本习题集，AI 以「资料」为对象解析。</p></div>
+                  <div className="flex items-center gap-3 shrink-0 flex-wrap">
+                    <button
+                      className="min-h-[32px] px-3 rounded-[8px] bg-white border border-[#D4D4D8] text-[#18181B] font-bold text-[13px] hover:bg-[#F4F4F5] transition-colors"
+                      onClick={() => setActiveKnowledgePanel("landing")}
+                    >← 返回</button>
+                    <button className="secondary-button" onClick={openResourceDialog}>上传资料</button>
+                  </div>
+                </div>
 
                     {/* 上传资源 Modal — 文件选择 + AI 识别状态机 */}
                     {activeDialog === "resource" && (
-                      <div className="modal-backdrop" role="presentation" onClick={() => setActiveDialog(null)}>
+                      <div className="modal-backdrop" role="presentation" onClick={closeResourceDialog}>
                         <section className="modal-panel" role="dialog" aria-modal="true" aria-label="AI识别资料" onClick={(event) => event.stopPropagation()}>
-                          <div className="modal-head"><div><span>AI First</span><strong>AI识别资料</strong></div><button onClick={() => setActiveDialog(null)}>关闭</button></div>
+                          <div className="modal-head"><div><span>AI First</span><strong>AI识别资料</strong></div><button onClick={closeResourceDialog}>关闭</button></div>
                           <form onSubmit={addResource} className="modal-form">
-                            <label className="upload-drop" style={{ minHeight: '140px', transition: 'all 0.3s ease' }}>
-                              <span style={{ fontSize: '18px' }}>📁 拖拽文件到此处</span>
-                              <span style={{ fontSize: '13px', color: 'var(--muted)', marginTop: '4px' }}>或点击选择 支持 PDF / Word / 图片</span>
-                              <input name="file" type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onChange={(e) => {
+                            <input type="hidden" name="sourceText" value={`${activeKnowledgeSubject || "未分科"}空白资料-${dateOnly()}`} />
+                            <label className={`upload-drop ${styles.uploadDropLarge}`}>
+                              <span className={styles.uploadDropIcon}>📁 拖拽文件到此处</span>
+                              <span className={styles.uploadDropHint}>或点击选择 支持 PDF（文件会保存在本机 IndexedDB）</span>
+                              <input name="file" type="file" accept=".pdf,application/pdf" onChange={(e) => {
                                 const file = e.target.files?.[0];
                                 if (!file) return;
                                 const rawName = file.name;
                                 const inferred = inferResource(rawName, "");
-                                setFileUploadState({ name: file.name, size: file.size, inferred, step: "uploading" });
-                                setTimeout(() => { setFileUploadState((prev) => { if (!prev) return prev; return { ...prev, step: "extracting" }; }); }, 400);
-                                setTimeout(() => { setFileUploadState((prev) => { if (!prev) return prev; return { ...prev, step: "identifying" }; }); }, 900);
-                                setTimeout(() => { setFileUploadState((prev) => { if (!prev) return prev; return { ...prev, step: "parsing" }; }); }, 1500);
-                                setTimeout(() => { setFileUploadState((prev) => { if (!prev) return prev; return { ...prev, step: "mapping" }; }); }, 2100);
-                                setTimeout(() => { setFileUploadState((prev) => { if (!prev) return prev; return { ...prev, step: "done" }; }); }, 2600);
+                                startUploadProgress(file, inferred);
                               }} />
                             </label>
                             {fileUploadState && (
                               <div className="p-3 mt-3 rounded-[8px] border border-[#E4E4E7] bg-white flex items-center gap-3">
-                                <span style={{ fontSize: '22px' }}>📄</span>
+                                <span className={styles.fileIcon}>📄</span>
                                 <div className="flex-1 min-w-0">
                                   <strong className="text-[14px] block truncate">{fileUploadState.name}</strong>
                                   <span className="text-[12px] text-[#71717A]">{(fileUploadState.size / (1024 * 1024)).toFixed(1)} MB · {fileUploadState.inferred.pages.includes("AI识别") ? "AI识别中" : fileUploadState.inferred.pages}</span>
@@ -1852,7 +2148,7 @@ export default function Home() {
                                 ))}
                                 <div className="flex gap-2 mt-3">
                                   <button className="primary-btn" type="submit">确认保存</button>
-                                  <button className="secondary-btn" type="button" onClick={() => setActiveDialog(null)}>取消</button>
+                                  <button className="secondary-btn" type="button" onClick={closeResourceDialog}>取消</button>
                                 </div>
                               </div>
                             )}
@@ -1924,10 +2220,16 @@ export default function Home() {
                         const isTextbook = resource.type === "教材";
                         const isPastPaper = resource.type.includes("真题");
                         return (
-                          <article key={resource.id} className={resourceView === "grid" ? "book-card" : ""} onClick={() => resourceView === "grid" ? openResource(resource) : undefined}>
+                          <article key={resource.id} className={resourceView === "grid" ? "book-card" : ""} onClick={() => { if (resourceView === "grid") { setReadingMode(true); openResource(resource); } }}>
                             {resourceView === "grid" ? (
+                              // ─── 书架卡（参考 Apple Books / 微信读书）：
+                              // 点击整卡进入阅读；当前阅读高亮主题色边框；细进度条；信息只保留主次
+                              // 管理操作（AI 重新分析/重命名/删除）全部收进 ⋯ 菜单
                               <>
-                                <div className={`book-spine ${isTextbook ? "empty-cover" : "has-cover"}`}>
+                                <div
+                                  className={`book-spine ${isTextbook ? "empty-cover" : "has-cover"} ${activeResource?.id === resource.id ? "current" : ""}`}
+                                  style={activeResource?.id === resource.id ? { borderColor: "#0F766E" } : undefined}
+                                >
                                   {isTextbook ? (
                                     <span className="initials">{initials}</span>
                                   ) : isPastPaper ? (
@@ -1937,21 +2239,44 @@ export default function Home() {
                                   )}
                                 </div>
                                 <div className="book-body">
+                                  {/* 当前阅读标签 */}
+                                  {activeResource?.id === resource.id && (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#F0FDF4] text-[#0F766E] border border-[#DCFCE7] mb-1 inline-block">📖 当前阅读</span>
+                                  )}
                                   <div className="book-title">{resource.name}</div>
-                                  <div className="book-author">{resource.author} · {resource.version || "待确认"}</div>
+                                  {/* 主信息：类型 · 状态（真题显示分析状态） */}
                                   <div className="book-tags">
                                     <span className="tag-badge subtle">{resource.type}</span>
-                                    <span className={`tag-badge ${resource.status === "已索引" ? "green" : "subtle"}`}>{resource.status}</span>
-                                    <span className="tag-badge subtle">{resource.pages || "—"}</span>
+                                    {isPastPaper ? (
+                                      <>
+                                        <span className={`tag-badge ${resource.status === "已索引" ? "green" : "warn"}`}>{resource.status === "已索引" ? "✓ 已分析" : "待分析"}</span>
+                                        {resource.status === "已索引" && <span className="tag-badge subtle">📊 七核:7 · 知识点:{nodeCount || "—"}</span>}
+                                      </>
+                                    ) : (
+                                      <span className={`tag-badge ${resource.status === "已索引" ? "green" : "subtle"}`}>{resource.status}</span>
+                                    )}
                                   </div>
-                                  <div className="flex flex-wrap gap-1 text-[11px] text-[#A1A1AA]">
-                                    <span>关联：{resource.linkedNode}</span>
-                                    <span>· {nodeCount} 知识点</span>
+                                  {/* 阅读进度（书架最重要的信息：读到哪里了） */}
+                                  <div className="text-[12px] text-[#71717A] mt-1.5 flex items-center gap-2">
+                                    <span>阅读到 P</span>
+                                    <strong className="text-[#18181B]">{resource.currentPage || resource.lastOpenedPage || "1"}</strong>
+                                    <span className="text-[11px] text-[#A1A1AA]">({resource.currentPage ? "续读" : "未开始"})</span>
                                   </div>
-                                  <div className="book-footer">
-                                    <button onClick={(e) => { e.stopPropagation(); openResource(resource); }}>📖 阅读</button>
-                                    <button className="text-button" onClick={(e) => { e.stopPropagation(); deleteResource(resource); }}>删除</button>
-                                  </div>
+                                  <progress
+                                    className={`${styles.progressBar} mt-1`}
+                                    value={Math.min(100, Math.max(3, (Number(resource.currentPage || resource.lastOpenedPage || 1) / Math.max(Number(String(resource.currentPage || "132").match(/\d+/)?.[0] || 132) + 40, 1)) * 100))}
+                                    max={100}
+                                  />
+                                  {/* ⋯ 菜单：AI 重新分析 / 删除（不再常驻操作按钮） */}
+                                  <details className="more-menu mt-2" onClick={(e) => e.stopPropagation()}>
+                                    <summary className="text-[12px] min-h-[24px] px-2 rounded-[6px] bg-[#F4F4F5] text-[#71717A] font-bold inline-flex items-center">⋯</summary>
+                                    <div className="more-items">
+                                      <button className="text-button text-[12px]" onClick={(e) => { e.stopPropagation(); analyzeMaterial(resource); }}>
+                                        {resource.status === "已索引" ? "🔄 AI 重新分析" : "🤖 AI 分析"}
+                                      </button>
+                                      <button className="text-button text-[12px]" onClick={(e) => { e.stopPropagation(); deleteResource(resource); }}>删除</button>
+                                    </div>
+                                  </details>
                                 </div>
                               </>
                             ) : (
@@ -1959,7 +2284,7 @@ export default function Home() {
                                 <strong>{resource.name}</strong>
                                 <span>{resource.subject} / {resource.type} / {resource.status}</span>
                                 <p>{resource.fileName} / {resource.pages || "未填页码"} / 关联：{resource.linkedNode}</p>
-                                <button className="text-button" onClick={() => openResource(resource)}>打开阅读</button>
+                                <button className="text-button" onClick={(event) => { event.stopPropagation(); setReadingMode(true); openResource(resource); }}>打开阅读</button>
                                 <details className="inline-details">
                                   <summary>编辑资源</summary>
                                   <div className="mini-form">
@@ -1975,81 +2300,102 @@ export default function Home() {
                         );
                       }) : <p className="empty-state">暂无资料，点击「上传资源」导入教材或真题。</p>}
                     </div>
-
-                    {/* Reader 阅读器 */}
-                    {activeResource && (
-                      <div className="mt-6 border-t border-[#E4E4E7] pt-4">
-                        <ReaderPanel
-                          activeResource={activeResource}
-                          readerSearch={readerSearch} readerPage={readerPage} readerZoom={readerZoom}
-                          relatedQuestions={relatedQuestions}
-                          subjectAnnotations={subjectAnnotations}
-                          subjectNodes={subjectNodes}
-                          onSetReaderSearch={setReaderSearch} onSetReaderPage={setReaderPage}
-                          onSetReaderZoom={setReaderZoom} onSaveProgress={() => {
-                            setResources((items) => items.map((item) => item.id === activeResource.id ? { ...item, readingMinutes: String(Math.max(Number(item.readingMinutes || 0), Math.round(elapsedSeconds / 60))) } : item));
-                          }}
-                          onShowRelated={showRelatedQuestions}
-                          onCreateCard={(text, annotation) => { createCardFromText("资料批注", text, annotation); setActiveView("cards"); setCardSubjectView(activeCardSubject || currentSubject?.name || ""); setActiveCardCategory(ALL_GROUPS); setCardSubView("待复习"); }}
-                          onCreateAnnotation={onCreateAnnotation}
-                          onDeleteAnnotation={onDeleteAnnotation}
-                          onEditAnnotation={onEditAnnotation}
-                          onJumpToPage={setReaderPage}
-                        />
-                      </div>
-                    )}
                   </div>
+                ) : activeResource ? (
+                  <ReaderPanel
+                    activeResource={activeResource}
+                    readerSearch={readerSearch} readerPage={readerPage} readerZoom={readerZoom}
+                    relatedQuestions={relatedQuestions}
+                    subjectAnnotations={subjectAnnotations}
+                    subjectNodes={subjectNodes}
+                    onSetReaderSearch={setReaderSearch} onSetReaderPage={setReaderPage}
+                    onSetReaderZoom={setReaderZoom} onSaveProgress={() => {
+                      setResources((items) => items.map((item) => item.id === activeResource.id ? { ...item, readingMinutes: String(Math.max(Number(item.readingMinutes || 0), Math.round(elapsedSeconds / 60))) } : item));
+                    }}
+                    onShowRelated={showRelatedQuestions}
+                    onCreateCard={(text, annotation) => { createCardFromText("资料批注", text, annotation); setActiveView("cards"); setCardSubjectView(activeCardSubject || currentSubject?.name || ""); setActiveCardCategory(ALL_GROUPS); setCardSubView("待复习"); }}
+                    onCreateAnnotation={onCreateAnnotation}
+                    onDeleteAnnotation={onDeleteAnnotation}
+                    onEditAnnotation={onEditAnnotation}
+                    onJumpToPage={setReaderPage}
+                  />
+                ) : (
+                  <p className="empty-state">当前学科暂无可阅读资料。</p>
+                )}
+              </div>
                 )}
 
-                {/* Questions */}
+                {/* Questions — 真题以「一套 / 一册」资料方式上传（与学习资料同款 AI 识别），不逐题录入 */}
                 {activeKnowledgePanel === "questions" && (
                   <div>
-                    <div className="section-heading">
-                      <div><div className="section-label">真题数据库</div><h2>{activeKnowledgeSubject} 真题录入、筛选、确认</h2></div>
-                      <div className="flex items-center gap-2">
+                    {/* 统一极简模板：Material Library + 标题 + 单一导入入口（与「学习资料」共用同一套头部结构） */}
+                    <div className="section-heading compact-heading">
+                      <div><div className="section-label">Material Library</div><h2>真题数据库</h2><p className="section-hint">{subjectQuestions.length} 套真题 · 以「一套 / 一册」为单位</p></div>
+                      <div className="flex items-center gap-3 shrink-0 flex-wrap">
                         <button
-                          className="min-h-[34px] px-4 rounded-[8px] bg-[#0F766E] text-white font-bold text-[13px] disabled:opacity-40"
-                          disabled={examAnalyzing || subjectQuestions.length === 0}
-                          title={subjectQuestions.length === 0 ? "先录入该科目的真题" : "用 DeepSeek 分析真题、提取高频考点并写入图谱"}
-                          onClick={() => runExamAnalysis(activeKnowledgeSubject)}
-                        >
-                          {examAnalyzing ? "AI 分析中…" : "AI 分析真题（正式）"}
-                        </button>
-                        <button className="secondary-button" onClick={() => setActiveDialog("question")}>录入题目</button>
+                          className="min-h-[32px] px-3 rounded-[8px] bg-white border border-[#D4D4D8] text-[#18181B] font-bold text-[13px] hover:bg-[#F4F4F5] transition-colors"
+                          onClick={() => setActiveKnowledgePanel("landing")}
+                        >← 返回</button>
+                        <button className="secondary-button" onClick={openResourceDialog}>上传真题</button>
                       </div>
                     </div>
-                    {activeDialog === "question" && (
-                      <div className="modal-backdrop" role="presentation" onClick={() => setActiveDialog(null)}>
-                        <section className="modal-panel" role="dialog" aria-modal="true" aria-label="手动录入题目" onClick={(event) => event.stopPropagation()}>
-                          <div className="modal-head"><div><span>真题数据库</span><strong>手动录入题目</strong></div><button onClick={() => setActiveDialog(null)}>关闭</button></div>
-                          <form className="form-grid question-form" onSubmit={addQuestion}>
-                            <label className="field"><span>所属科目</span><select name="subject">{subjects.map((subject) => <option key={subject.id}>{subject.name}</option>)}</select></label>
-                            <label className="field"><span>学校</span><input name="school" /></label>
-                            <label className="field"><span>年份</span><input name="year" /></label>
-                            <label className="field"><span>题号</span><input name="number" /></label>
-                            <label className="field"><span>题型</span><input name="type" /></label>
-                            <label className="field"><span>分值</span><input name="score" /></label>
-                            <label className="field"><span>七核</span><select name="core">{coreNames.map((core) => <option key={core}>{core}</option>)}</select></label>
-                            <label className="field"><span>分支</span><input name="branch" /></label>
-                            <label className="field"><span>知识点</span><input name="knowledge" /></label>
-                            <label className="field"><span>难度 1-5</span><input name="difficulty" /></label>
-                            <label className="field"><span>学习层级</span><select name="layer"><option>第 1 层</option><option>第 2 层</option><option>第 3 层</option><option>第 4 层</option></select></label>
-                            <label className="field wide-field"><span>题干</span><input name="stem" /></label>
-                            <label className="field wide-field"><span>标准答案</span><input name="answer" /></label>
-                            <label className="field wide-field"><span>原始解析</span><input name="originalAnalysis" /></label>
-                            <button>手动录入题目</button>
+                    <p className="text-[12px] text-[#71717A] mb-4">
+                      🤖 真题以「一套（PDF）」方式上传，AI 自动识别年份/套卷并按题号拆分。不逐题录入。
+                    </p>
+                    {examAnalyzing && (
+                      <div className="mb-3 text-[12px] text-[#0F766E] font-bold">AI 分析中…（运行 runExamAnalysis）</div>
+                    )}
+                    {activeDialog === "resource" && (
+                      <div className="modal-backdrop" role="presentation" onClick={closeResourceDialog}>
+                        <section className="modal-panel" role="dialog" aria-modal="true" aria-label="AI识别资料" onClick={(event) => event.stopPropagation()}>
+                          <div className="modal-head"><div><span>真题库</span><strong>上传一套真题</strong></div><button onClick={closeResourceDialog}>关闭</button></div>
+                          <form onSubmit={addResource} className="modal-form">
+                            <input type="hidden" name="sourceText" value={`${activeKnowledgeSubject || "未分科"}空白真题卷-${dateOnly()}`} />
+                            <label className={`upload-drop ${styles.uploadDropLarge}`}>
+                              <span className={styles.uploadDropIcon}>📁 拖拽一套真题 PDF 到此处</span>
+                              <span className={styles.uploadDropHint}>或点击选择 支持 PDF（AI 自动识别年份/套卷/题号）</span>
+                              <input name="file" type="file" accept=".pdf,application/pdf" onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const inferred = inferResource(file.name, activeKnowledgeSubject);
+                                startUploadProgress(file, inferred);
+                              }} />
+                            </label>
+                            {fileUploadState?.step === "done" && (
+                              <div className="p-3 mt-3 rounded-[8px] border border-[#E4E4E7] bg-white">
+                                <div className="text-[12px] font-bold text-[#18181B] mb-2">AI 识别结果（整套真题）</div>
+                                {[
+                                  { icon: '📝', label: '套卷', value: fileUploadState.inferred.name },
+                                  { icon: '📚', label: '所属科目', value: fileUploadState.inferred.subject },
+                                  { icon: '🧠', label: '知识体系', value: fileUploadState.inferred.linkedNode },
+                                ].map((item) => (
+                                  <div key={item.label} className="flex items-center gap-2 text-[12px] mt-1">
+                                    <span>{item.icon}</span><span className="text-[#71717A] w-[64px] shrink-0">{item.label}</span><span className="text-[#18181B]">{item.value}</span>
+                                  </div>
+                                ))}
+                                <div className="flex gap-2 mt-3">
+                                  <button className="primary-btn" type="submit">确认保存整套</button>
+                                  <button className="secondary-btn" type="button" onClick={closeResourceDialog}>取消</button>
+                                </div>
+                              </div>
+                            )}
+                            {!fileUploadState && <button className="primary-btn mt-3" type="submit">直接添加空白真题卷</button>}
                           </form>
                         </section>
                       </div>
                     )}
                     <div className="filter-bar">
-                      <select value={questionFilter.subject} onChange={(event) => setQuestionFilter({ ...questionFilter, subject: event.target.value })}><option>全部</option>{subjects.map((subject) => <option key={subject.id}>{subject.name}</option>)}</select>
+                      <select value={questionFilter.subject} onChange={(event) => {
+                        const subject = event.target.value;
+                        setQuestionFilter({ ...questionFilter, subject });
+                        if (subject !== "全部") setActiveKnowledgeSubject(subject);
+                      }}><option>全部</option>{subjects.map((subject) => <option key={subject.id}>{subject.name}</option>)}</select>
                       <select value={questionFilter.core} onChange={(event) => setQuestionFilter({ ...questionFilter, core: event.target.value })}><option>全部</option>{coreNames.map((core) => <option key={core}>{core}</option>)}</select>
                       <select value={questionFilter.result} onChange={(event) => setQuestionFilter({ ...questionFilter, result: event.target.value })}><option>全部</option><option>未做</option><option>正确</option><option>错误</option></select>
                       <input value={questionFilter.keyword} onChange={(event) => setQuestionFilter({ ...questionFilter, keyword: event.target.value })} placeholder="搜索年份/题干/知识点" />
                     </div>
                     <div className="question-list">
-                      {filteredQuestions.filter((question) => question.subject === activeKnowledgeSubject).map((question) => (
+                      {filteredQuestions.map((question) => (
                         <article key={question.id} className={!question.confirmed ? "unconfirmed" : ""}>
                           <div><strong>{question.year} {question.subject} 第 {question.number} 题</strong><b>{question.confirmed ? "已确认" : "待确认"}</b></div>
                           <p>{question.stem}</p>
@@ -2081,37 +2427,26 @@ export default function Home() {
                           </details>
                         </article>
                       ))}
-                      {filteredQuestions.filter((question) => question.subject === activeKnowledgeSubject).length === 0 && <p className="empty-state">当前筛选下没有真题。</p>}
+                      {filteredQuestions.length === 0 && <p className="empty-state">当前筛选下没有真题。</p>}
                     </div>
                   </div>
                 )}
 
-                {/* Graph */}
+                {/* Graph — 知识点由 AI 自动识别、随学习进度更新（不手动上传） */}
                 {activeKnowledgePanel === "graph" && (
                   <div>
                     <div className="section-heading">
-                      <div><div className="section-label">知识图谱</div><h2>{activeKnowledgeSubject} 七核、分支、知识点编辑</h2></div>
-                      <button className="secondary-button" onClick={() => setActiveDialog("node")}>添加知识点</button>
-                    </div>
-                    {activeDialog === "node" && (
-                      <div className="modal-backdrop" role="presentation" onClick={() => setActiveDialog(null)}>
-                        <section className="modal-panel" role="dialog" aria-modal="true" aria-label="添加知识点" onClick={(event) => event.stopPropagation()}>
-                          <div className="modal-head"><div><span>知识图谱</span><strong>添加知识点</strong></div><button onClick={() => setActiveDialog(null)}>关闭</button></div>
-                          <form className="form-grid" onSubmit={addNode}>
-                            <label className="field"><span>所属科目</span><select name="subject">{subjects.map((subject) => <option key={subject.id}>{subject.name}</option>)}</select></label>
-                            <label className="field"><span>七核</span><select name="core">{coreNames.map((core) => <option key={core}>{core}</option>)}</select></label>
-                            <label className="field"><span>分支</span><input name="branch" /></label>
-                            <label className="field wide-field"><span>知识点</span><input name="knowledge" /></label>
-                            <label className="field wide-field"><span>解释</span><input name="explanation" /></label>
-                            <label className="field"><span>前置</span><input name="prerequisite" /></label>
-                            <label className="field"><span>相关</span><input name="related" /></label>
-                            <label className="field"><span>掌握层级</span><select name="masteryLevel"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
-                            <label className="field"><span>掌握分数</span><input name="masteryScore" /></label>
-                            <button>添加知识点</button>
-                          </form>
-                        </section>
+                      <div><div className="section-label">知识图谱</div><h2>{activeKnowledgeSubject} 知识图谱</h2></div>
+                      <div className="flex items-center gap-3 shrink-0 flex-wrap">
+                        <button
+                          className="min-h-[32px] px-3 rounded-[8px] bg-white border border-[#D4D4D8] text-[#18181B] font-bold text-[13px] hover:bg-[#F4F4F5] transition-colors"
+                          onClick={() => setActiveKnowledgePanel("landing")}
+                        >← 返回</button>
                       </div>
-                    )}
+                    </div>
+                    <p className="text-[12px] text-[#71717A] mb-4">
+                      🤖 知识点由 AI 从已上传资料自动识别，并随学习进度（做题/复习/复盘）自动更新掌握度。
+                    </p>
                     <div className="knowledge-list">
                       {subjectNodes.map((node) => (
                         <article key={node.id} className="p-3 rounded-[8px] border border-[#E4E4E7] bg-white">
@@ -2137,7 +2472,7 @@ export default function Home() {
                           </details>
                         </article>
                       ))}
-                      {subjectNodes.length === 0 && <p className="empty-state">暂无知识点，点击「添加知识点」开始构建图谱。</p>}
+                      {subjectNodes.length === 0 && <p className="empty-state">暂无知识点——上传资料并点击「AI 分析」后自动生成图谱。</p>}
                     </div>
                   </div>
                 )}
@@ -2163,7 +2498,7 @@ export default function Home() {
                     {/* 新建卡片 — Secondary（中权重） */}
                     <button
                       className="min-h-[32px] px-3 rounded-[8px] bg-white border border-[#D4D4D8] text-[#18181B] font-bold text-[13px] hover:bg-[#F4F4F5] transition-colors"
-                      onClick={() => { setEditingCardId(null); setActiveDialog("card"); }}
+                      onClick={openNewCardDialog}
                     >新建卡片</button>
                     {/* 开始复习 — Primary（最高权重，放最右） */}
                     <button
@@ -2350,29 +2685,50 @@ export default function Home() {
                   ))}
                 </div>
 
-                {/* 卡片组内统计：待复习 / 全部卡片 / 今日已复习 / 收藏 */}
-                <div className="metric-grid mb-4">
-                  <div><span>待复习</span><strong>{categoryQueueCards.length}</strong></div>
-                  <div><span>全部卡片</span><strong>{currentCategoryCards.length}</strong></div>
-                  <div><span>今日已复习</span><strong>{currentCategoryCards.filter((c) => c.lastReviewed !== "未复习" && c.lastReviewed.slice(0, 10) === hydratedTodayStr).length}</strong></div>
-                  <div><span>收藏卡片</span><strong>{currentCategoryCards.filter((c) => c.favorite).length}</strong></div>
+                {/* ─── 信息架构（2026-08-01）：状态筛选 × 分组方式 两个独立维度 ─── */}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-[#A1A1AA] mr-0.5">状态</span>
+                    {(["待复习", "全部", "收藏"] as const).map((view) => (
+                      <button
+                        key={view}
+                        className={`min-h-[28px] px-3 rounded-[8px] font-bold text-[12px] ${cardFilter === view ? "bg-[#18181B] text-white" : "bg-[#F4F4F5] text-[#18181B]"}`}
+                        onClick={() => setCardFilter(view)}
+                      >
+                        {view}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-[#A1A1AA] mr-0.5">分组</span>
+                    {(["按七核", "按掌握度", "按时间"] as const).map((g) => (
+                      <button
+                        key={g}
+                        className={`min-h-[28px] px-3 rounded-[8px] font-bold text-[12px] ${cardGroupBy === g ? "bg-[#18181B] text-white" : "bg-[#F4F4F5] text-[#18181B]"}`}
+                        onClick={() => setCardGroupBy(g)}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {/* 筛选 / 查看方式：待复习 / 全部 / 按七核 / 按掌握状态 */}
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {(["待复习", "全部", "按七核", "按掌握状态"] as const).map((view) => (
+                {/* 多模式学习（PRD 3.4）：背诵 / 填空 / 推导 / 条件辨析 */}
+                <div className="flex items-center gap-1.5 mb-3">
+                  <span className="text-[11px] font-bold text-[#A1A1AA] mr-0.5">模式</span>
+                  {(["背诵", "填空", "推导", "条件辨析"] as const).map((mode) => (
                     <button
-                      key={view}
-                      className={`min-h-[30px] px-3 rounded-[8px] font-bold text-[12px] ${cardSubView === view ? "bg-[#18181B] text-white" : "bg-[#F4F4F5] text-[#18181B]"}`}
-                      onClick={() => setCardSubView(view)}
+                      key={mode}
+                      className={`min-h-[28px] px-3 rounded-[8px] font-bold text-[12px] ${cardMode === mode ? "bg-[#18181B] text-white" : "bg-[#F4F4F5] text-[#18181B]"}`}
+                      onClick={() => setCardMode(mode)}
                     >
-                      {view}
+                      {mode}
                     </button>
                   ))}
                 </div>
 
-                {/* 待复习 → 卡片复习器（仅当前卡片组范围） */}
-                {cardSubView === "待复习" && (
+                {/* 待复习（状态=待复习）→ 卡片复习器（仅当前卡片组范围） */}
+                {cardFilter === "待复习" && (
                   categoryReviewQueue.length > 0 ? (
                     <CardViewer
                       activeCard={activeGroupCard}
@@ -2390,11 +2746,11 @@ export default function Home() {
                   )
                 )}
 
-                {/* 按七核查看 → 按 core 分组统计该卡片组卡片 */}
-                {cardSubView === "按七核" && (
+                {/* 分组=按七核（默认）：按 core 分组统计当前筛选卡片 */}
+                {cardGroupBy === "按七核" && (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     {coreNames.map((core) => {
-                      const coreCards = currentCategoryCards.filter((card) => card.core === core);
+                      const coreCards = visibleCategoryCards.filter((card) => card.core === core);
                       if (coreCards.length === 0) return null;
                       return (
                         <article key={core} className="p-3 rounded-[8px] border border-[#E4E4E7] bg-white">
@@ -2406,11 +2762,11 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* 按掌握状态查看 → 按 mastery 分组统计该卡片组卡片 */}
-                {cardSubView === "按掌握状态" && (
+                {/* 分组=按掌握度：按 mastery 分组统计当前筛选卡片 */}
+                {cardGroupBy === "按掌握度" && (
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     {(["不会", "模糊", "认识", "熟练"] as const).map((mastery) => {
-                      const masteryCards = currentCategoryCards.filter((card) => card.mastery === mastery);
+                      const masteryCards = visibleCategoryCards.filter((card) => card.mastery === mastery);
                       if (masteryCards.length === 0) return null;
                       return (
                         <article key={mastery} className="p-3 rounded-[8px] border border-[#E4E4E7] bg-white">
@@ -2422,10 +2778,29 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* 全部 → 该卡片组全部卡片网格（含移动到其他卡片组管理） */}
-                {cardSubView === "全部" && (
+                {/* 分组=按时间：按复习时间/到期状态统计当前筛选卡片 */}
+                {cardGroupBy === "按时间" && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {[
+                      { label: "未复习", list: visibleCategoryCards.filter((card) => card.lastReviewed === "未复习") },
+                      { label: "到期复习", list: visibleCategoryCards.filter((card) => card.lastReviewed !== "未复习" && (!card.nextReviewAt || card.nextReviewAt <= hydratedTodayStr)) },
+                      { label: "未来复习", list: visibleCategoryCards.filter((card) => card.lastReviewed !== "未复习" && card.nextReviewAt > hydratedTodayStr) },
+                    ].map((group) => (
+                      group.list.length > 0 ? (
+                        <article key={group.label} className="p-3 rounded-[8px] border border-[#E4E4E7] bg-white">
+                          <strong className="text-[13px] block mb-2">{group.label}</strong>
+                          <span className="text-[12px] text-[#71717A]">{group.list.length} 张卡片</span>
+                        </article>
+                      ) : null
+                    ))}
+                    {visibleCategoryCards.length === 0 && <p className="empty-state">当前筛选下暂无卡片。</p>}
+                  </div>
+                )}
+
+                {/* 状态=全部/收藏 → 该卡片组卡片网格（含移动到其他卡片组管理） */}
+                {(cardFilter === "全部" || cardFilter === "收藏") && (
                   <div className="card-grid">
-                    {currentCategoryCards.map((card) => (
+                    {visibleCategoryCards.map((card) => (
                       <article className="study-card" key={card.id}>
                         <div className="study-card-head">
                           <strong>{card.title}</strong>
@@ -2459,14 +2834,14 @@ export default function Home() {
                           <button className="text-button text-[12px]" onClick={() => reviewCard(card.id, "模糊")}>模糊</button>
                           <button className="text-button text-[12px]" onClick={() => reviewCard(card.id, "不会")}>不会</button>
                           <button className="text-button text-[12px]" onClick={() => setCards((items) => items.map((item) => item.id === card.id ? { ...item, favorite: !item.favorite } : item))}>{card.favorite ? "★收藏" : "收藏"}</button>
-                          <button className="text-button text-[12px]" onClick={() => { setEditingCardId(card.id); setActiveDialog("card"); }}>编辑</button>
+                          <button className="text-button text-[12px]" onClick={() => openEditCardDialog(card)}>编辑</button>
                           <button className="text-button text-[12px]" onClick={() => openCardSource(card)}>来源</button>
                           <button className="text-button text-[12px]" onClick={() => showRelatedQuestions(card.core, card.knowledge, card.subject)}>真题</button>
                           <button className="text-button text-[12px]" onClick={() => deleteCard(card)}>删除</button>
                         </div>
                       </article>
                     ))}
-                    {currentCategoryCards.length === 0 && <p className="empty-state">该卡片组暂无卡片。</p>}
+                    {visibleCategoryCards.length === 0 && <p className="empty-state">{cardFilter === "收藏" ? "该卡片组暂无收藏卡片。" : "该卡片组暂无卡片。"}</p>}
                   </div>
                 )}
               </>
@@ -2493,6 +2868,11 @@ export default function Home() {
                     const form = new FormData(event.currentTarget);
                     const front = String(form.get("front") ?? "").trim();
                     if (!front) return;
+                    const submittedSubject = String(form.get("subject") ?? "").trim() || activeCardSubject || currentSubject?.name || "";
+                    const submittedSubjectRecord = subjects.find((subject) => subject.name === submittedSubject);
+                    const safeCategoryId = cardDialogCategory && submittedSubjectRecord && categories.some((cat) => cat.id === cardDialogCategory && cat.subjectId === submittedSubjectRecord.id)
+                      ? cardDialogCategory
+                      : undefined;
                     if (editingCard) {
                       // 编辑：保留 id / createdAt / 学习状态，更新可编辑字段
                       setCards((items) => items.map((item) => item.id === editingCard.id
@@ -2502,13 +2882,13 @@ export default function Home() {
                             front,
                             back: String(form.get("back") ?? "").trim() || "待补充",
                             type: String(form.get("type") ?? item.type) as GrowthCard["type"],
-                            subject: String(form.get("subject") ?? "").trim() || item.subject,
+                            subject: submittedSubject || item.subject,
                             core: String(form.get("core") ?? "").trim() || item.core,
                             branch: String(form.get("branch") ?? "").trim() || "",
                             knowledge: String(form.get("knowledge") ?? "").trim() || "",
                             source: String(form.get("source") ?? "").trim() || item.source,
                             page: String(form.get("page") ?? "").trim() || item.page,
-                            categoryId: String(form.get("category") ?? "") || undefined,
+                            categoryId: safeCategoryId,
                           }
                         : item));
                       setNotice("已保存卡片修改");
@@ -2516,11 +2896,10 @@ export default function Home() {
                       setActiveDialog(null);
                       return;
                     }
-                    const subject = String(form.get("subject") ?? "").trim() || activeCardSubject || currentSubject?.name || "";
+                    const subject = submittedSubject;
                     const subjectNode = nodes.find((n) => n.subject === subject);
                     const type = String(form.get("type") ?? "概念卡") as GrowthCard["type"];
                     // 分类可选，不选 → 未分类；分类列表只显示当前学科（学科隔离）
-                    const selectedCategoryId = String(form.get("category") ?? "") || undefined;
                     const card: GrowthCard = {
                       id: makeId("c"),
                       title: front.slice(0, 40),
@@ -2542,7 +2921,7 @@ export default function Home() {
                       mastery: "模糊",
                       note: "",
                       favorite: false,
-                      categoryId: selectedCategoryId,
+                      categoryId: safeCategoryId,
                     };
                     setCards((items) => [card, ...items]);
                     setActiveCardSubject(subject);
@@ -2553,12 +2932,12 @@ export default function Home() {
                     <label className="field wide-field"><span>正面 *</span><input name="front" defaultValue={editingCard?.front ?? ""} autoFocus required /></label>
                     <label className="field wide-field"><span>背面</span><input name="back" defaultValue={editingCard?.back ?? ""} placeholder="可选，默认待补充" /></label>
                     <label className="field"><span>类型</span><select name="type" defaultValue={editingCard?.type ?? "概念卡"}><option>公式卡</option><option>概念卡</option><option>填空卡</option><option>推导卡</option><option>条件辨析卡</option><option>错题卡</option></select></label>
-                    <label className="field wide-field"><span>卡片组</span><select name="category" defaultValue={editingCard?.categoryId ?? (activeCardCategory && activeCardCategory !== ALL_GROUPS && activeCardCategory !== UNCATEGORIZED ? activeCardCategory : "")}><option value="">未分类</option>{subjectCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></label>
+                    <label className="field wide-field"><span>卡片组</span><select name="category" value={cardDialogCategory} onChange={(event) => setCardDialogCategory(event.target.value)}><option value="">未分类</option>{cardDialogSubjectCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></label>
                     {/* 高级信息默认折叠：编辑时预填，新建时自动继承上下文 */}
                     <details className="inline-details mt-2">
                       <summary className="text-[12px] text-[#71717A] font-bold">更多设置</summary>
                       <div className="grid grid-cols-1 gap-3 mt-2">
-                        <label className="field"><span>科目</span><select name="subject" defaultValue={(editingCard?.subject) || activeCardSubject || currentSubject?.name || ""}>{subjects.map((subject) => <option key={subject.id} value={subject.name}>{subject.name}</option>)}</select></label>
+                        <label className="field"><span>科目</span><select name="subject" value={cardDialogSubject} onChange={(event) => { setCardDialogSubject(event.target.value); setCardDialogCategory(""); }}>{subjects.map((subject) => <option key={subject.id} value={subject.name}>{subject.name}</option>)}</select></label>
                         <label className="field"><span>七核</span><select name="core" defaultValue={editingCard?.core ?? ""}><option value="">自动继承当前科目</option>{coreNames.map((core) => <option key={core} value={core}>{core}</option>)}</select></label>
                         <label className="field"><span>分支</span><input name="branch" defaultValue={editingCard?.branch ?? ""} placeholder="自动继承当前科目" /></label>
                         <label className="field"><span>知识点</span><input name="knowledge" defaultValue={editingCard?.knowledge ?? ""} placeholder="自动继承当前科目" /></label>
@@ -2579,12 +2958,16 @@ export default function Home() {
           <SettingsPanel
             exam={exam}
             subjects={subjects}
+            appSettings={appSettings}
             onUpdateExam={(patch) => setExam((prev) => ({ ...prev, ...patch }))}
             onAddSubject={(subject) => setSubjects((prev) => [...prev, subject])}
             onUpdateSubject={(id, patch) => setSubjects((prev) =>
               prev.map((s) => (s.id === id ? { ...s, ...patch } : s))
             )}
             onRemoveSubject={(id) => setSubjects((prev) => prev.filter((s) => s.id !== id))}
+            onUpdateAppSettings={(patch) => setAppSettings((prev) => ({ ...prev, ...patch }))}
+            onExportData={handleExportData}
+            onImportData={handleImportData}
           />
         )}
 

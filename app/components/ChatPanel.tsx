@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import type { AgentMessage, ChatSession } from "../lib/types";
+import { saveUiState } from "../lib/storage";
+import { formatMessageTime } from "../lib/utils";
+import styles from "../../styles/components.module.css";
 
 /**
  * AI 学习助手（Conversation UX v2）
@@ -24,7 +27,7 @@ import type { AgentMessage, ChatSession } from "../lib/types";
  * - 会话项更多菜单（⋯）：仅点击 ⋯ 打开；Portal 挂到 body（fixed 定位），
  *   避免被 overflow 滚动容器裁切；按剩余空间自动向上/向下展开
  * - 历史会话滚动状态：新建会话滚顶、切换滚入可视、手动滚动保存位置、打开菜单不跳动
- * - 学习上下文固定在顶部（学科 / 当前资源 / 页码）
+ * - 学习上下文改为消息内联显示（不再常驻顶部状态栏——UX 减法）
  * - 消息类型视觉区分（AI 建议 / 系统操作 / 数据记录）
  */
 
@@ -41,21 +44,6 @@ const SESSION_STATUS_ICONS: Record<NonNullable<ChatSession["status"]>, string> =
   completed: "⚪",
   paused: "🟡",
 };
-
-/** 时间格式化：当天 HH:mm；非当天 M月D日 HH:mm；跨年 YYYY年M月D日 HH:mm */
-function formatMessageTime(iso: string | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const now = new Date();
-  const sameYear = d.getFullYear() === now.getFullYear();
-  const sameDay = sameYear && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  if (sameDay) return `${hh}:${mm}`;
-  if (sameYear) return `${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`;
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`;
-}
 
 /** 同一分钟内连续的多条系统消息 → 合并显示一次时间 */
 function sameMinute(a: string | undefined, b: string | undefined): boolean {
@@ -163,15 +151,14 @@ export function ChatPanel({
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   // 更多菜单：仅通过 ⋯ 按钮点击打开；同一时间只开一个（null = 全部关闭）
   const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
-  const [menuAbove, setMenuAbove] = useState(false);
   // ⋯ 按钮 ref（计算菜单位置与展开方向）
   const menuButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   // Portal 菜单 fixed 定位（相对 viewport；不放在 overflow 容器内，避免被裁切）
   const [menuRect, setMenuRect] = useState<{ top: number; right: number; width: number } | null>(null);
-  // 菜单内容在关闭后保留最后一次（供 Portal 稳定渲染，避免闪烁）
-  const menuDataRef = useRef<ChatSession | null>(null);
-  const menuPinnedRef = useRef(false);
-  const menuAboveRef = useRef(false);
+  // P3 交互修复（2026-08-01）：定制内联重命名 + 两阶段删除会话（替代原生 prompt/confirm）
+  const [renameTargetId, setRenameTargetId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // 手动滚动标记（新建/切换自动滚动时跳过保存）
   const userScrollingRef = useRef(false);
@@ -198,7 +185,6 @@ export function ChatPanel({
       const target = e.target as HTMLElement;
       if (target.closest("[data-session-menu]")) return;
       setMenuSessionId(null);
-      setMenuAbove(false);
     }
     document.addEventListener("mousedown", onDocPointerDown);
     return () => document.removeEventListener("mousedown", onDocPointerDown);
@@ -206,7 +192,6 @@ export function ChatPanel({
 
   // 会话列表滚动：关闭菜单；用户滚动（非自动）时保存位置
   const sessionListScrollRef = useRef<HTMLDivElement | null>(null);
-  const SESSION_SCROLL_KEY = "kaoyan-chat-history-scroll";
   useEffect(() => {
     const el = sessionListScrollRef.current;
     if (!el) return;
@@ -214,11 +199,10 @@ export function ChatPanel({
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
     function onListScroll() {
       setMenuSessionId(null);
-      setMenuAbove(false);
       if (userScrollingRef.current) {
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(() => {
-          try { localStorage.setItem(SESSION_SCROLL_KEY, String(container.scrollTop)); } catch { /* ignore */ }
+          saveUiState("chat-history-scroll", container.scrollTop);
         }, 300);
       }
     }
@@ -236,10 +220,10 @@ export function ChatPanel({
   }, []);
 
   // 切换对话：清空输入框、关闭菜单；若该会话不在可视区自动滚入（不强制回顶）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setInput("");
     setMenuSessionId(null);
-    setMenuAbove(false);
     setMenuRect(null);
     const listEl = sessionListScrollRef.current;
     if (listEl && activeSessionId) {
@@ -258,6 +242,7 @@ export function ChatPanel({
     // 切换后恢复用户标记
     setTimeout(() => { userScrollingRef.current = false; }, 100);
   }, [activeSessionId, sessions]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -293,7 +278,7 @@ export function ChatPanel({
   const conversationMessages = chatMessages.filter((m) => m.role !== "system");
   const [systemOpen, setSystemOpen] = useState(false);
 
-  // 打开菜单：计算 fixed 坐标 + 方向；菜单内容存 ref 供 Portal 稳定渲染
+  // 打开菜单：计算 fixed 坐标 + 方向
   function openMenu(s: ChatSession) {
     const btn = menuButtonRefs.current.get(s.id);
     const MENU_W = 148;
@@ -302,22 +287,19 @@ export function ChatPanel({
       const rect = btn.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
       const above = spaceBelow < MENU_H;
-      setMenuAbove(above);
       setMenuRect({
         top: above ? rect.bottom - MENU_H : rect.bottom + 4,
         right: Math.max(8, window.innerWidth - rect.right + 2),
         width: MENU_W,
       });
-      // 内容持久化到 ref（关闭时 Portal 仍可渲染，避免闪烁）
-      menuDataRef.current = s;
-      menuPinnedRef.current = Boolean((s as ChatSession & { pinned?: boolean }).pinned);
-      menuAboveRef.current = above;
     }
     setMenuSessionId(s.id);
   }
 
   // Portal 渲染更多菜单（挂到 body，fixed 定位，不被 overflow 容器裁切）
-  const portableMenu = menuSessionId && menuRect ? (
+  const menuSession = menuSessionId ? sessions.find((s) => s.id === menuSessionId) ?? null : null;
+  const menuSessionPinned = Boolean(menuSession && (menuSession as ChatSession & { pinned?: boolean }).pinned);
+  const portableMenu = menuSession && menuRect ? (
     createPortal(
       <div
         data-session-menu
@@ -327,41 +309,33 @@ export function ChatPanel({
           right: menuRect.right,
         }}
       >
-        {menuSessionId && (() => {
-          const s = menuDataRef.current ?? sessions.find((x) => x.id === menuSessionId);
-          if (!s) return null;
-          const isPinned = menuPinnedRef.current;
-          return (
-            <>
-              {onRenameSession && (
-                <button
-                  className="flex items-center gap-2.5 w-full text-left text-[14px] h-[38px] px-2.5 rounded-[6px] hover:bg-[#F4F4F5] text-[#18181B]"
-                  onClick={() => {
-                    const name = window.prompt("重命名会话", s.title);
-                    if (name?.trim()) onRenameSession(s.id, name.trim());
-                    setMenuSessionId(null);
-                    setMenuAbove(false);
-                  }}
-                >
-                  <svg className="w-[16px] h-[16px] shrink-0 text-[#71717A]" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zM19.5 7.125L16.875 4.5" /></svg>
-                  重命名
-                </button>
-              )}
+        <>
+              <button
+                className="flex items-center gap-2.5 w-full text-left text-[14px] h-[38px] px-2.5 rounded-[6px] hover:bg-[#F4F4F5] text-[#18181B]"
+                onClick={() => {
+                  // P3 交互修复：不再用原生 prompt，转内联编辑（列表顶部渲染编辑条）
+                  setRenameTargetId(menuSession.id);
+                  setRenameValue(menuSession.title);
+                  setMenuSessionId(null);
+                }}
+              >
+                <svg className="w-[16px] h-[16px] shrink-0 text-[#71717A]" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zM19.5 7.125L16.875 4.5" /></svg>
+                重命名
+              </button>
               {onTogglePinned && (
                 <button
                   className="flex items-center gap-2.5 w-full text-left text-[14px] h-[38px] px-2.5 rounded-[6px] hover:bg-[#F4F4F5] text-[#18181B]"
-                  onClick={() => { onTogglePinned(s.id); setMenuSessionId(null); setMenuAbove(false); }}
+                  onClick={() => { onTogglePinned(menuSession.id); setMenuSessionId(null); }}
                 >
                   <svg className="w-[16px] h-[16px] shrink-0 text-[#71717A]" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0zM6.75 12.75l-2.25 6h15l-2.25-6a6.75 6.75 0 10-10.5 0z" /></svg>
-                  {isPinned ? "取消固定" : "固定会话"}
+                  {menuSessionPinned ? "取消固定" : "固定会话"}
                 </button>
               )}
               <button
                 className="flex items-center gap-2.5 w-full text-left text-[14px] h-[38px] px-2.5 rounded-[6px] hover:bg-[#F4F4F5] text-[#18181B]"
                 onClick={() => {
-                  navigator.clipboard?.writeText(`【${s.title}】\n${s.messages.map((m) => `${m.role === "user" ? "我" : m.role === "system" ? "系统" : "AI"}：${m.content}`).join("\n")}`).then(() => {
+                  navigator.clipboard?.writeText(`【${menuSession.title}】\n${menuSession.messages.map((m) => `${m.role === "user" ? "我" : m.role === "system" ? "系统" : "AI"}：${m.content}`).join("\n")}`).then(() => {
                     setMenuSessionId(null);
-                    setMenuAbove(false);
                   });
                 }}
               >
@@ -372,32 +346,27 @@ export function ChatPanel({
                 <button
                   className="flex items-center gap-2.5 w-full text-left text-[14px] h-[38px] px-2.5 rounded-[6px] hover:bg-[#F4F4F5] text-[#18181B]"
                   onClick={() => {
-                    const next = s.status === "completed" ? "active" : s.status === "paused" ? "active" : "completed";
-                    onUpdateSessionStatus(s.id, next);
+                    const next = menuSession.status === "completed" ? "active" : menuSession.status === "paused" ? "active" : "completed";
+                    onUpdateSessionStatus(menuSession.id, next);
                     setMenuSessionId(null);
-                    setMenuAbove(false);
                   }}
                 >
                   <svg className="w-[16px] h-[16px] shrink-0 text-[#71717A]" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  {s.status === "completed" ? "恢复学习" : "标记完成"}
+                  {menuSession.status === "completed" ? "恢复学习" : "标记完成"}
                 </button>
               )}
-              {onDeleteSession && (
-                <button
-                  className="flex items-center gap-2.5 w-full text-left text-[14px] h-[38px] px-2.5 rounded-[6px] hover:bg-[#FEF2F2] text-[#EF4444]"
-                  onClick={() => {
-                    if (window.confirm(`删除会话「${s.title}」？`)) onDeleteSession(s.id);
-                    setMenuSessionId(null);
-                    setMenuAbove(false);
-                  }}
-                >
-                  <svg className="w-[16px] h-[16px] shrink-0 text-[#EF4444]" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                  删除
-                </button>
-              )}
-            </>
-          );
-        })()}
+              <button
+                className="flex items-center gap-2.5 w-full text-left text-[14px] h-[38px] px-2.5 rounded-[6px] hover:bg-[#FEF2F2] text-[#EF4444]"
+                onClick={() => {
+                  // P3 交互修复：不再用原生 confirm，转两阶段确认
+                  setConfirmDeleteId(menuSession.id);
+                  setMenuSessionId(null);
+                }}
+              >
+                <svg className="w-[16px] h-[16px] shrink-0 text-[#EF4444]" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                删除
+              </button>
+        </>
       </div>,
       document.body
     )
@@ -405,7 +374,7 @@ export function ChatPanel({
 
   return (
     // P0 修复：必须用固定 height（而非 minHeight），否则历史会话/聊天变长会把整个页面撑高出现整页滚动条
-    <section className="flex flex-col overflow-hidden" id="ai-chat-panel" style={{ height: "calc(100vh - 120px)" }}>
+    <section className={`flex flex-col overflow-hidden ${styles.chatPanelHeight}`} id="ai-chat-panel">
       {/* ─── 顶部操作栏（上下文跟随消息内联显示，不再常驻顶部） ─── */}
       <div className="flex items-center gap-3 px-4 py-3 mb-0 rounded-t-[10px] border border-b-0 border-[#E4E4E7] bg-white shrink-0">
         <div className="flex-1" />
@@ -531,6 +500,54 @@ export function ChatPanel({
               ref={sessionListScrollRef}
               className="flex-1 overflow-y-auto overflow-x-hidden p-1.5 pb-4 min-h-0 thin-scrollbar"
             >
+              {/* P3 交互修复：内联重命名条（替代原生 prompt） */}
+              {renameTargetId && (
+                <div className="p-2 mb-2 rounded-[8px] border border-[#E4E4E7] bg-[#FAFAFA]">
+                  <div className="text-[11px] font-bold text-[#52525B] mb-1">重命名会话</div>
+                  <input
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    className="w-full min-h-[30px] text-[12px] px-2 rounded-[6px] border border-[#D4D4D8] bg-white"
+                    placeholder="会话名称"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (renameValue.trim()) onRenameSession(renameTargetId, renameValue.trim());
+                        setRenameTargetId(null);
+                      }
+                      if (e.key === "Escape") setRenameTargetId(null);
+                    }}
+                  />
+                  <div className="flex gap-1.5 mt-1.5">
+                    <button
+                      className="text-[11px] font-bold px-2 py-1 rounded-[6px] bg-[#18181B] text-white"
+                      onClick={() => { if (renameValue.trim()) onRenameSession(renameTargetId, renameValue.trim()); setRenameTargetId(null); }}
+                    >保存</button>
+                    <button
+                      className="text-[11px] font-bold px-2 py-1 rounded-[6px] bg-[#F4F4F5] text-[#71717A]"
+                      onClick={() => setRenameTargetId(null)}
+                    >取消</button>
+                  </div>
+                </div>
+              )}
+
+              {/* P3 交互修复：两阶段删除确认条（替代原生 confirm） */}
+              {confirmDeleteId && (
+                <div className="p-2 mb-2 rounded-[8px] border border-[#FECACA] bg-[#FEF2F2]">
+                  <div className="text-[12px] text-[#B91C1C] mb-1">删除该会话？此操作不可撤销。</div>
+                  <div className="flex gap-1.5">
+                    <button
+                      className="text-[11px] font-bold px-2 py-1 rounded-[6px] bg-[#DC2626] text-white"
+                      onClick={() => { onDeleteSession(confirmDeleteId); setConfirmDeleteId(null); }}
+                    >确认删除</button>
+                    <button
+                      className="text-[11px] font-bold px-2 py-1 rounded-[6px] bg-white text-[#71717A] border border-[#D4D4D8]"
+                      onClick={() => setConfirmDeleteId(null)}
+                    >取消</button>
+                  </div>
+                </div>
+              )}
+
               {groupSessions(orderedSessions).map((group) => (
                 <div key={group.label}>
                   <div className="text-[10px] font-bold text-[#A1A1AA] px-2 pb-1 pt-2.5">{group.label}</div>
@@ -543,8 +560,7 @@ export function ChatPanel({
                         key={s.id}
                         data-session-id={s.id}
                         data-session-menu
-                        className={`relative rounded-[8px] mb-1.5 ${isActive ? "bg-[#18181B] text-white" : "hover:bg-[#F4F4F5]"} transition-colors`}
-                        style={{ height: "88px" }}
+                        className={`relative rounded-[8px] mb-1.5 ${isActive ? "bg-[#18181B] text-white" : "hover:bg-[#F4F4F5]"} transition-colors ${styles.sessionItemHeight}`}
                       >
                         {/* 会话主体（点击切换对话；⋯ 按钮独立 32×32，互不影响） */}
                         <button
@@ -574,7 +590,6 @@ export function ChatPanel({
                             e.stopPropagation();
                             if (wasMenuOpen) {
                               setMenuSessionId(null);
-                              setMenuAbove(false);
                               return;
                             }
                             openMenu(s);

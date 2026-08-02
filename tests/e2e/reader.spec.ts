@@ -16,6 +16,9 @@ async function gotoReader(page: import("@playwright/test").Page) {
   await page.waitForTimeout(300);
   await page.getByRole("button", { name: "828 物理化学" }).first().click();
   await page.getByRole("button", { name: "学习资料" }).click();
+  await expect(page.locator(".bookshelf-grid .book-card").first()).toBeVisible();
+  await page.locator(".bookshelf-grid .book-card").first().click();
+  await expect(page.locator(".readerGrid, [class*=readerGrid]").first()).toBeVisible();
 }
 
 test.describe("Reader 阅读器", () => {
@@ -137,13 +140,17 @@ test.describe("Reader 阅读器", () => {
     await page.getByRole("button", { name: "确认添加" }).click();
     await expect(page.locator(".annotationText, [class*=annotationText]").filter({ hasText: "待编辑批注" }).first()).toBeVisible();
 
-    // 编辑（prompt 对话框）—— 定位到包含测试批注的条目
-    page.once("dialog", (dialog) => dialog.accept("编辑后的批注"));
+    // 编辑（内联表单，替代原生 prompt）
     const myEditItem = page
       .locator("[class*=annotationItem]")
       .filter({ has: page.locator("[class*=annotationText]").filter({ hasText: "待编辑批注" }) })
       .first();
     await myEditItem.getByRole("button", { name: "编辑" }).click();
+    // 内联输入框出现：填入新 note 并保存
+    const inlineInput = myEditItem.locator("input[placeholder='批注备注']");
+    await expect(inlineInput).toBeVisible();
+    await inlineInput.fill("编辑后的批注");
+    await myEditItem.getByRole("button", { name: "保存" }).click();
     // onEditAnnotation 更新的是 note（.annotationNote），selection 不变
     await expect(myEditItem.locator("[class*=annotationNote]").filter({ hasText: "编辑后的批注" }).first()).toBeVisible();
 
@@ -160,12 +167,14 @@ test.describe("Reader 阅读器", () => {
     await page.locator("textarea").first().fill("待删除批注");
     await page.getByRole("button", { name: "确认添加" }).click();
 
-    page.once("dialog", (dialog) => dialog.accept());
+    // 删除（两阶段确认，替代原生 confirm）：点击「删除」→ 出现「确认删除」→ 点击确认
     const myDeleteItem = page
       .locator("[class*=annotationItem]")
       .filter({ has: page.locator("[class*=annotationText]").filter({ hasText: "待删除批注" }) })
       .first();
     await myDeleteItem.getByRole("button", { name: "删除" }).click();
+    await expect(myDeleteItem.getByRole("button", { name: "确认删除" })).toBeVisible();
+    await myDeleteItem.getByRole("button", { name: "确认删除" }).click();
     await expect(page.locator(".annotationText, [class*=annotationText]").filter({ hasText: "待删除批注" })).toHaveCount(0);
 
     const issues = collector.getIssues();
@@ -176,7 +185,8 @@ test.describe("Reader 阅读器", () => {
     const collector = attachConsoleCollector(page);
 
     await gotoReader(page);
-    await page.getByRole("button", { name: "上传资源" }).click();
+    await page.getByRole("button", { name: "← 返回" }).click();
+    await page.getByRole("button", { name: "上传资料" }).click();
 
     const dialog = page.getByLabel("AI识别资料");
     await expect(dialog).toBeVisible();

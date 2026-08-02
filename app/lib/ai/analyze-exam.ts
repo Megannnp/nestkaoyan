@@ -40,6 +40,9 @@ export function analyzeErrorReason(error?: string): string {
 }
 
 export async function analyzeExam(subject: string, questions: Question[]): Promise<AnalyzeResult> {
+  if (!subject.trim() || questions.length === 0) {
+    return { ok: false, cores: [], nodes: [], error: "no_questions" };
+  }
   const payload = {
     subject,
     questions: questions.map((q) => ({ year: q.year, number: q.number, core: q.core, stem: q.stem })),

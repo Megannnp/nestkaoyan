@@ -210,3 +210,28 @@
 .secondaryButton:hover {
   background: #E4E4E7;
 }
+
+.uploadDropLarge {
+  min-height: 140px;
+  transition: all 0.3s ease;
+}
+
+.uploadDropIcon {
+  font-size: 18px;
+}
+
+.uploadDropHint {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.fileIcon {
+  font-size: 22px;
+}
+
+.progressBar {
+  width: 100%;
+  height: 6px;
+  accent-color: #0F766E;
+}

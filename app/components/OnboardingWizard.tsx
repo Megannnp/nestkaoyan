@@ -99,6 +99,7 @@ export function OnboardingWizard({ onComplete, onLoadDemo }: OnboardingWizardPro
   const [impKind, setImpKind] = useState<ResourceType>("past_exam");
   const [impName, setImpName] = useState("");
   const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
 
   const patchExam = (patch: Partial<ExamGoal>) => setExam((prev) => ({ ...prev, ...patch }));
 
@@ -120,6 +121,11 @@ export function OnboardingWizard({ onComplete, onLoadDemo }: OnboardingWizardPro
     const raw = (file?.name || impName).trim();
     const subjectName = impSubject || subjects[0]?.name;
     if (!raw || !subjectName) return;
+    if (file && !(file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"))) {
+      setImportError("当前仅支持导入 PDF 文件。");
+      return;
+    }
+    setImportError("");
     setImporting(true);
     try {
       const resource = await buildResource(subjectName, impKind, raw, file);
@@ -287,11 +293,12 @@ export function OnboardingWizard({ onComplete, onLoadDemo }: OnboardingWizardPro
                   <input className={inputCls} value={impName} onChange={(e) => setImpName(e.target.value)} placeholder="如：2010-2024 真题" />
                 </div>
                 <label className={`${ghostCls} grid place-items-center cursor-pointer`}>
-                  选择文件
-                  <input type="file" className="hidden" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onChange={(e) => { const f = e.target.files?.[0] ?? null; if (f) addResourceEntry(f); e.currentTarget.value = ""; }} />
+                  选择 PDF
+                  <input type="file" className="hidden" accept=".pdf,application/pdf" onChange={(e) => { const f = e.target.files?.[0] ?? null; if (f) addResourceEntry(f); e.currentTarget.value = ""; }} />
                 </label>
                 <button type="button" className={primaryCls} disabled={importing || (!impName.trim())} onClick={() => addResourceEntry(null)}>{importing ? "导入中…" : "添加"}</button>
               </div>
+              {importError && <p className="text-[12px] text-[#EF4444] mb-3">{importError}</p>}
               {subjects.length === 0 && <p className="text-[12px] text-[#EF4444] mb-3">请先在上一步添加科目。</p>}
               {resources.length === 0 ? (
                 <p className="text-[13px] text-[#A1A1AA] text-center py-6 border border-dashed border-[#D4D4D8] rounded-[8px]">还没有导入资料。也可以直接跳过，之后在知识中心再上传。</p>

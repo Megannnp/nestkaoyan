@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, type FormEvent, type MouseEvent as ReactMo
 import type {
   MasteryText, StudyMood, WorkspaceView, KnowledgePanel,
   DashboardPanel, ReviewScope, ActiveDialog, DeletedBackup,
-  ExamGoal, Resource, Question, KnowledgeNode, Task,
+  Resource, Question, KnowledgeNode, Task,
   PendingItem, Review, PlanLog, StudyDay,
   GrowthCard, Annotation, AgentStep, StudyDraft, AgentMessage, ChatSession, CardCategory,
   StructuredReview, Material, MaterialSection
@@ -15,7 +15,7 @@ import {
   seedTasks, seedNotes, seedCards, seedAnnotations, seedAppSettings,
   seedStudyDays, seedCardCategories, seedMaterials, seedMaterialSections
 } from "./lib/default-data";
-import { TASK, TOAST_DURATION, MAX_STUDY_DAYS, MAX_DATE_RANGE_DAYS } from "./lib/rules";
+import { TASK, TOAST_DURATION, MAX_STUDY_DAYS } from "./lib/rules";
 import { savePdfFile, deletePdfFile } from "./lib/pdf-storage";
 import { hydrateWorkspace, saveWorkspace } from "./lib/storage";
 import { loadLearningEvents, appendLearningEvent, type LearningEvent } from "./lib/events";
@@ -1662,6 +1662,13 @@ export default function Home() {
       ? { ...s, title: s.title === "新对话" ? text.slice(0, 20) : s.title, status: "active", messages: [...s.messages, { id: makeId("m"), role: "user", content: text, createdAt: new Date().toISOString(), messageType: "chat" }] }
       : s));
     setChatInput("");
+    // REVIEW_v6 P2：笔记/总结分支必须优先于「今天/学什么」——「把今天整理成笔记」含「今天」
+    // 若「今天」分支在前会被误转发为「生成今日计划」。笔记分支提前后该快速 prompt 正确进笔记分支。
+    if (text.includes("笔记") || text.includes("总结")) {
+      setNotes((items) => [{ id: makeId("n"), title: "AI 生成笔记", body: "今日重点：先判断过程类型，再选择熵变公式。", tags: ["AI笔记", "热力学"] }, ...items]);
+      pushAssistant("已生成成长笔记。");
+      return;
+    }
     if (text.includes("今天") || text.includes("学什么")) {
       runPlanGeneration();
       return;
@@ -1695,11 +1702,6 @@ export default function Home() {
     }
     if (text.includes("错") || text.includes("不会")) {
       runMistakeAnalysis(currentSubject?.name ?? "");
-      return;
-    }
-    if (text.includes("笔记") || text.includes("总结")) {
-      setNotes((items) => [{ id: makeId("n"), title: "AI 生成笔记", body: "今日重点：先判断过程类型，再选择熵变公式。", tags: ["AI笔记", "热力学"] }, ...items]);
-      pushAssistant("已生成成长笔记。");
       return;
     }
     if (text.includes("复习")) {
@@ -1746,7 +1748,9 @@ export default function Home() {
     categories, subjectCategories, subjectCards, dueCards, categoryStats, uncategorizedCardCount,
     newCardDeckOpen, newCardDeckName, cardFilter, cardGroupBy, cardMode,
     categoryReviewQueue, activeGroupCard, categoryClampedCardIndex, cardFlipped, focusMode,
-    visibleCategoryCards, hydratedTodayStr, activeDialog, editingCard,
+    visibleCategoryCards, hydratedTodayStr,
+    renamingCardId, renamingCardName, deletingCardId,
+    activeDialog, editingCard,
     cardDialogCategory, cardDialogSubject, cardDialogSubjectCategories, nodes, activeResource, currentSubject,
     setActiveCardSubject, setCardSubjectView, setActiveCardCategory, setCardIndex, setCardFlipped,
     setCardSubView, setRenamingCardId, setRenamingCardName, setCardMenuOpenId, setDeletingCardId,

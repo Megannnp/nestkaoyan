@@ -57,6 +57,10 @@ export interface WorkspaceCtx {
   focusMode: boolean;
   visibleCategoryCards: GrowthCard[];
   hydratedTodayStr: string;
+  // 重命名/删除编辑态 value（抽取 CardsView 时漏传——只传了 setter，导致点击无响应）
+  renamingCardId: string | null;
+  renamingCardName: string;
+  deletingCardId: string | null;
   activeDialog: ActiveDialog;
   editingCard: GrowthCard | null;
   cardDialogCategory: string;

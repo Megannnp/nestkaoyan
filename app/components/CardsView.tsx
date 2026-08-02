@@ -17,11 +17,12 @@ export function CardsView() {
     newCardDeckOpen, newCardDeckName, cardFilter, cardGroupBy, cardMode,
     categoryReviewQueue, activeGroupCard, categoryClampedCardIndex, cardFlipped, focusMode,
     visibleCategoryCards, hydratedTodayStr, activeDialog, editingCard,
+    renamingCardId, renamingCardName, deletingCardId,
     cardDialogCategory, cardDialogSubject, cardDialogSubjectCategories, nodes, activeResource, currentSubject,
     setActiveCardSubject, setCardSubjectView, setActiveCardCategory, setCardIndex, setCardFlipped,
     setCardSubView, setRenamingCardId, setRenamingCardName, setCardMenuOpenId, setDeletingCardId,
     setNewCardDeckOpen, setNewCardDeckName, setCardFilter, setCardGroupBy, setCardMode, setFocusMode,
-    setCards, setNotice, setEditingCardId, setActiveDialog, setCardDialogCategory, setCardDialogSubject,
+    setCards, setCategories, setNotice, setEditingCardId, setActiveDialog, setCardDialogCategory, setCardDialogSubject,
     openNewCardDialog, addCategoryInline, moveCard, reviewCard, openCardSource, showRelatedQuestions,
     moveCardToCategory, openEditCardDialog, deleteCard, pushAssistant,
   } = useWorkspace();
@@ -229,6 +230,47 @@ export function CardsView() {
                   ))}
                 </div>
 
+                {/* REVIEW_v6 P1: 卡片组重命名内联编辑框（抽取 WorkspaceContext 时只传 setter 未传 value，点击无响应；现补消费端 UI） */}
+                {renamingCardId && (
+                  <div className="mb-4 p-3 rounded-[8px] border border-[#E4E4E7] bg-white flex items-center gap-2">
+                    <strong className="text-[12px] text-[#18181B] shrink-0">重命名卡片组</strong>
+                    <input
+                      autoFocus
+                      className="min-h-[34px] text-[13px] px-3 rounded-[8px] border border-[#D4D4D8] bg-white focus:outline-none focus:ring-2 focus:ring-[#18181B]/10 flex-1"
+                      value={renamingCardName}
+                      maxLength={30}
+                      onChange={(e) => setRenamingCardName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          const name = renamingCardName.trim().slice(0, 30);
+                          if (!name) { setNotice("名称不能为空"); return; }
+                          if (subjectCategories.some((c) => c.id !== renamingCardId && c.name === name)) { setNotice("卡片组名称已存在"); return; }
+                          setCategories((items) => items.map((c) => c.id === renamingCardId ? { ...c, name, updatedAt: today() } : c));
+                          setNotice(`已重命名卡片组：${name}`);
+                          setRenamingCardId(null);
+                        }
+                        if (e.key === "Escape") setRenamingCardId(null);
+                      }}
+                    />
+                    <button
+                      className="min-h-[32px] px-3 rounded-[8px] bg-[#18181B] text-white font-bold text-[12px]"
+                      onClick={() => {
+                        const name = renamingCardName.trim().slice(0, 30);
+                        if (!name) { setNotice("名称不能为空"); return; }
+                        if (subjectCategories.some((c) => c.id !== renamingCardId && c.name === name)) { setNotice("卡片组名称已存在"); return; }
+                        setCategories((items) => items.map((c) => c.id === renamingCardId ? { ...c, name, updatedAt: today() } : c));
+                        setNotice(`已重命名卡片组：${name}`);
+                        setRenamingCardId(null);
+                      }}
+                    >保存</button>
+                    <button
+                      className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#71717A] font-bold text-[12px]"
+                      onClick={() => setRenamingCardId(null)}
+                    >取消</button>
+                  </div>
+                )}
+
                 {/* ─── 信息架构（2026-08-01）：状态筛选 × 分组方式 两个独立维度 ─── */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4">
                   <div className="flex items-center gap-1.5">
@@ -400,6 +442,38 @@ export function CardsView() {
                 onReview={reviewCard}
                 onClose={() => setFocusMode(false)}
               />
+            )}
+
+            {/* REVIEW_v6 P1: 删除卡片组确认弹窗（原来只设 state 不渲染，点击无响应；卡片归入未分类，不丢失内容） */}
+            {deletingCardId && (
+              <div className="modal-backdrop" role="presentation" onClick={() => setDeletingCardId(null)}>
+                <section className="modal-panel compact-modal" role="dialog" aria-modal="true" aria-label="删除卡片组" onClick={(event) => event.stopPropagation()}>
+                  <div className="modal-head">
+                    <div><span>卡片组管理</span><strong>删除卡片组？</strong></div>
+                    <button onClick={() => setDeletingCardId(null)}>关闭</button>
+                  </div>
+                  <div className="p-4">
+                    <p className="text-[13px] text-[#71717A] leading-relaxed mb-2">
+                      删除「{subjectCategories.find((c) => c.id === deletingCardId)?.name ?? "该卡片组"}」后，其中卡片将归入「未分类」，卡片内容不会丢失。
+                    </p>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        className="min-h-[34px] px-4 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]"
+                        onClick={() => setDeletingCardId(null)}
+                      >取消</button>
+                      <button
+                        className="min-h-[34px] px-4 rounded-[8px] bg-[#EF4444] text-white font-bold text-[13px]"
+                        onClick={() => {
+                          setCards((items) => items.map((c) => c.categoryId === deletingCardId ? { ...c, categoryId: undefined } : c));
+                          setCategories((items) => items.filter((c) => c.id !== deletingCardId));
+                          setNotice("已删除卡片组（卡片已归入未分类）");
+                          setDeletingCardId(null);
+                        }}
+                      >确认删除</button>
+                    </div>
+                  </div>
+                </section>
+              </div>
             )}
 
             {/* 新建 / 编辑卡片弹窗（编辑时预填并更新；新建时自动继承上下文 + 更多设置折叠） */}

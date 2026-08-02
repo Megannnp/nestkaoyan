@@ -8,10 +8,23 @@
  * props 逐个透传。接口随每个视图的抽出逐步扩充——只加该视图真正用到的字段。
  */
 
-import { createContext, useContext, type Dispatch, type SetStateAction } from "react";
+import { createContext, useContext, type Dispatch, type SetStateAction, type FormEvent } from "react";
 import type {
   Subject, GrowthCard, CardCategory, KnowledgeNode, Resource, ActiveDialog,
+  KnowledgePanel, WorkspaceView, PendingItem, Annotation, Question,
 } from "../lib/types";
+import type { LearningEvent } from "../lib/events";
+
+/** inferResource 的返回结构（AI 识别资料的推断结果） */
+export interface ResourceInference {
+  subject: string;
+  type: string;
+  name: string;
+  pages: string;
+  linkedNode: string;
+  recommendedLayer: string;
+  duplicate: boolean;
+}
 
 export interface WorkspaceCtx {
   // ── 常量（page.tsx 内定义，经 ctx 透出，避免各处引用被改动）──
@@ -70,6 +83,7 @@ export interface WorkspaceCtx {
   setCardMode: Dispatch<SetStateAction<string>>;
   setFocusMode: Dispatch<SetStateAction<boolean>>;
   setCards: Dispatch<SetStateAction<GrowthCard[]>>;
+  setCategories: Dispatch<SetStateAction<CardCategory[]>>;
   setNotice: Dispatch<SetStateAction<string>>;
   setEditingCardId: Dispatch<SetStateAction<string | null>>;
   setActiveDialog: Dispatch<SetStateAction<ActiveDialog>>;
@@ -87,6 +101,61 @@ export interface WorkspaceCtx {
   openEditCardDialog: (card: GrowthCard) => void;
   deleteCard: (item: GrowthCard) => void;
   pushAssistant: (text: string) => void;
+
+  // ── Knowledge 视图所需 state / 派生值 ──
+  activeView: WorkspaceView;
+  activeKnowledgePanel: KnowledgePanel;
+  activeKnowledgeSubject: string;
+  resourceView: "grid" | "list";
+  readingMode: boolean;
+  readerPage: string;
+  readerSearch: string;
+  readerZoom: string;
+  examAnalyzing: boolean;
+  elapsedSeconds: number;
+  fileUploadState: { name: string; size: number; inferred: ResourceInference; step: string } | null;
+  questionFilter: { subject: string; core: string; result: string; keyword: string };
+  pending: PendingItem[];
+  filteredQuestions: Question[];
+  relatedQuestions: Question[];
+  subjectResources: Resource[];
+  subjectQuestions: Question[];
+  subjectNodes: KnowledgeNode[];
+  subjectAnnotations: Annotation[];
+
+  // ── Knowledge setters ──
+  setActiveView: Dispatch<SetStateAction<WorkspaceView>>;
+  setActiveKnowledgePanel: Dispatch<SetStateAction<KnowledgePanel>>;
+  setActiveKnowledgeSubject: Dispatch<SetStateAction<string>>;
+  setResourceView: Dispatch<SetStateAction<"grid" | "list">>;
+  setReadingMode: Dispatch<SetStateAction<boolean>>;
+  setReaderPage: Dispatch<SetStateAction<string>>;
+  setReaderSearch: Dispatch<SetStateAction<string>>;
+  setReaderZoom: Dispatch<SetStateAction<string>>;
+  setResources: Dispatch<SetStateAction<Resource[]>>;
+  setQuestions: Dispatch<SetStateAction<Question[]>>;
+  setQuestionFilter: Dispatch<SetStateAction<{ subject: string; core: string; result: string; keyword: string }>>;
+  setNodes: Dispatch<SetStateAction<KnowledgeNode[]>>;
+  setLearningEvents: Dispatch<SetStateAction<LearningEvent[]>>;
+
+  // ── Knowledge handlers ──
+  selectKnowledgeSubject: (subjectName: string) => void;
+  inferResource: (rawName: string, subjectHint: string) => ResourceInference;
+  openResource: (resource: Resource) => void;
+  openResourceDialog: () => void;
+  closeResourceDialog: () => void;
+  startUploadProgress: (file: File, inferred: ResourceInference) => void;
+  addResource: (event: FormEvent<HTMLFormElement>) => void;
+  deleteResource: (item: Resource) => void;
+  analyzeMaterial: (resource: Resource) => void;
+  confirmPendingItem: (item: PendingItem) => void;
+  dismissPendingItem: (item: PendingItem) => void;
+  deleteQuestion: (item: Question) => void;
+  deleteNode: (item: KnowledgeNode) => void;
+  createCardFromText: (createdBy: GrowthCard["createdBy"], text: string, annotation?: Annotation) => void;
+  onCreateAnnotation: (page: string, selection: string, tag: Annotation["tag"], note: string) => void;
+  onEditAnnotation: (id: string, note: string) => void;
+  onDeleteAnnotation: (id: string) => void;
 }
 
 const Ctx = createContext<WorkspaceCtx | null>(null);

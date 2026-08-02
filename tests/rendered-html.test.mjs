@@ -75,23 +75,26 @@ test("dashboard SSR renders sidebar nav and task content", async () => {
 
 test("knowledge/agent/cards/settings page code exists in page.tsx", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  // Knowledge 视图已抽出为 KnowledgeView 组件（视图内容在其中；page.tsx 保留 handlers + 挂载）
+  const knowledge = await readFile(new URL("../app/components/KnowledgeView.tsx", import.meta.url), "utf8");
 
   // Knowledge Center pages
   assert.match(page, /activeView === "knowledge"/);
-  assert.match(page, /学习资料/);
-  assert.match(page, /真题数据库/);
-  assert.match(page, /知识图谱/);
-  assert.match(page, /我的资料库/);
-  assert.match(page, /上传资源/);
-  assert.match(page, /打开阅读/);
-  assert.match(page, /activeKnowledgePanel === "resources"/);
-  assert.match(page, /activeKnowledgePanel === "questions"/);
-  assert.match(page, /activeKnowledgePanel === "graph"/);
+  assert.match(page, /<KnowledgeView/);
+  assert.match(knowledge, /学习资料/);
+  assert.match(knowledge, /真题数据库/);
+  assert.match(knowledge, /知识图谱/);
+  assert.match(knowledge, /我的资料库/);
+  assert.match(knowledge, /上传资源/);
+  assert.match(knowledge, /打开阅读/);
+  assert.match(knowledge, /activeKnowledgePanel === "resources"/);
+  assert.match(knowledge, /activeKnowledgePanel === "questions"/);
+  assert.match(knowledge, /activeKnowledgePanel === "graph"/);
   assert.match(page, /openResource/);
   assert.match(page, /inferResource/);
   assert.match(page, /addResource/);
   assert.match(page, /analyzeMaterial/);
-  assert.match(page, /直接添加空白真题卷/);
+  assert.match(knowledge, /直接添加空白真题卷/);
 
   // Agent page
   assert.match(page, /activeView === "agent"/);
@@ -100,11 +103,12 @@ test("knowledge/agent/cards/settings page code exists in page.tsx", async () => 
   // UX Sprint 重构后类名为 quick-prompts（原 prompt-bar 已废弃）
   assert.match(page, /quick-prompts/);
 
-  // Cards
+  // Cards（视图抽出为 CardsView；复习队列逻辑随之迁移）
+  const cards = await readFile(new URL("../app/components/CardsView.tsx", import.meta.url), "utf8");
   assert.match(page, /activeView === "cards"/);
   assert.match(page, /subjectCards/);
   assert.match(page, /dueCards/);
-  assert.match(page, /cardQueue/);
+  assert.match(cards, /categoryReviewQueue/);
   // UX Sprint 后快速创建改为弹窗（editingCardId / editingCard 控制）；quickCardFront 已废弃
   assert.match(page, /editingCardId/);
   assert.match(page, /createCardFromText/);

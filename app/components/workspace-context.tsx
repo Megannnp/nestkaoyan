@@ -13,6 +13,7 @@ import type {
   Subject, GrowthCard, CardCategory, KnowledgeNode, Resource, ActiveDialog,
   KnowledgePanel, WorkspaceView, PendingItem, Annotation, Question,
   Task, AgentStep, AgentMessage, ChatSession, ExamGoal, AppSettings,
+  MasteryText, StudyMood, StudyDraft,
 } from "../lib/types";
 import type { LearningEvent } from "../lib/events";
 
@@ -198,6 +199,21 @@ export interface WorkspaceCtx {
   setAppSettings: Dispatch<SetStateAction<AppSettings>>;
   handleExportData: () => void;
   handleImportData: (file: File) => Promise<void>;
+
+  // ── 学习结果记录弹窗（TaskCompletionModal）所需 ──
+  activeTask: Task | null;
+  masteryOptions: MasteryText[];
+  moodOptions: StudyMood[];
+  completionModalAllowEditTime: boolean;
+  completionModalCustomEndTime: string;
+  completionModalCustomMinutes: string;
+  closeConfirmPending: boolean;
+  completeTask: (id: string) => void;
+  requestCloseTaskDialog: () => void;
+  markTaskDraftDirty: (task: Task, patch: Partial<Pick<StudyDraft, "mastery" | "accuracy" | "mood" | "note" | "customMinutes" | "elapsedSeconds">>) => void;
+  setCompletionModalAllowEditTime: Dispatch<SetStateAction<boolean>>;
+  setCompletionModalCustomMinutes: Dispatch<SetStateAction<string>>;
+  setCloseConfirmPending: Dispatch<SetStateAction<boolean>>;
 }
 
 const Ctx = createContext<WorkspaceCtx | null>(null);

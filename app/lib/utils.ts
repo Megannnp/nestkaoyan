@@ -1,6 +1,6 @@
-import type { ExamGoal } from "./types";
-import { seedExam } from "./default-data";
-import { MAX_DATE_RANGE_DAYS } from "./rules";
+import type { ExamGoal } from "./types.ts";
+import { seedExam } from "./default-data.ts";
+import { MAX_DATE_RANGE_DAYS } from "./rules.ts";
 
 /**
  * 纯工具函数（无 React 状态依赖）。

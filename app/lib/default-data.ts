@@ -1,5 +1,5 @@
-import type { ExamGoal, Subject, Task, StudyDay, GrowthCard, CardDeck, CardCategory, Resource, Question, KnowledgeNode, Note, Annotation, AppSettings } from "./types";
-import { resourceToMaterial, resourceToMaterialSections } from "./types";
+import type { ExamGoal, Subject, Task, StudyDay, GrowthCard, CardDeck, CardCategory, Resource, Question, KnowledgeNode, Note, Annotation, AppSettings } from "./types.ts";
+import { resourceToMaterial, resourceToMaterialSections } from "./types.ts";
 
 // Static seed data - use FIXED dates to avoid hydration mismatch between server and client
 // These are placeholder dates for initial seed data only.

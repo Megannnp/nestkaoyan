@@ -21,7 +21,8 @@ import { hydrateWorkspace, saveWorkspace } from "./lib/storage";
 import { loadLearningEvents, appendLearningEvent, type LearningEvent } from "./lib/events";
 import { computeReplayComparison, computeProgressComparison } from "./lib/replay-console";
 import { projectKnowledgeState } from "./lib/projection";
-import { extractReviewFields } from "./lib/memory-rules";
+import { buildReviewSubjects, reviewMinutesOf, reviewCompletedCount, reviewNewNodesCount, reviewDoneQuestionsCount, reviewReviewedCardsCount, reviewMasteryAverage, buildReviewAiSummary, buildStructuredReview } from "./lib/reviews";
+import { createChatSession, createMessage, appendMessage, migrateLegacyChat, classifyPromptIntent } from "./lib/chat";
 import styles from "../styles/workspace.module.css";
 import { Sidebar } from "./components/Sidebar";
 import { ReviewPanel } from "./components/ReviewPanel";
@@ -37,7 +38,8 @@ import { analyzeExam, analyzeErrorReason } from "./lib/ai/analyze-exam";
 import { analyzeMistakes, mistakesErrorReason } from "./lib/ai/analyze-mistakes";
 import { generatePlan as generateTodayPlan, planErrorReason } from "./lib/ai/plan-generate";
 import { buildMaterialBundle, buildPlaceholderQuestionsForPastPaper, extractQuestionKeyword } from "./lib/materials";
-import { makeId, today, dateOnly, normalizeExamGoal, dateRange } from "./lib/utils";
+import { buildHeatmapDays, formatHeatmapStart, monBasedOffsetOf, buildHeatmapGrid, buildHeatmapDayLabels, countCardsByDate } from "./lib/heatmap";
+import { makeId, today, dateOnly, normalizeExamGoal } from "./lib/utils";
 
 const quickPrompts = ["今天学什么", "找近五年化学势真题", "傅献彩哪里讲这个", "为什么总错这类题", "把今天整理成笔记", "分析最近三套真题，更新图谱并重排计划", "我现在属于第几轮"];
 const masteryOptions: MasteryText[] = ["完全不懂", "有些模糊", "基本理解", "能够讲清", "能够迁移"];
@@ -189,14 +191,14 @@ export default function Home() {
   }, []);
 
   // --- Derived / computed values ---
-  const reviewSubjects = ["全部科目", ...subjects.map((s) => s.name)];
-  const reviewMinutes = tasks.filter((t) => t.done).reduce((sum, t) => sum + (Number(t.actualMinutes) || 0), 0);
-  const reviewCompletedTasks = tasks.filter((t) => t.done).length;
-  const reviewNewNodes = nodes.filter((n) => n.isMonthlyFocus).length;
-  const reviewDoneQuestions = questions.filter((q) => q.done).length;
-  const reviewReviewedCards = cards.filter((c) => c.lastReviewed !== "未复习").length;
-  const reviewMasteryDelta = nodes.reduce((sum, n) => sum + n.masteryScore, 0) / Math.max(nodes.length, 1);
-  const reviewAiSummary = `今日完成 ${reviewCompletedTasks} 个任务，掌握度变化 ${Math.round(reviewMasteryDelta)}%。`;
+  const reviewSubjects = buildReviewSubjects(subjects.map((s) => s.name));
+  const reviewMinutes = reviewMinutesOf(tasks);
+  const reviewCompletedTasks = reviewCompletedCount(tasks);
+  const reviewNewNodes = reviewNewNodesCount(nodes);
+  const reviewDoneQuestions = reviewDoneQuestionsCount(questions);
+  const reviewReviewedCards = reviewReviewedCardsCount(cards);
+  const reviewMasteryDelta = reviewMasteryAverage(nodes);
+  const reviewAiSummary = buildReviewAiSummary(tasks, nodes);
   const subjectCards = cards.filter((card) => card.subject === activeCardSubject);
   const dueCards = subjectCards.filter((card) => card.mastery === "不会" || card.mastery === "模糊" || card.lastReviewed === "未复习" || !card.nextReviewAt || card.nextReviewAt <= hydratedTodayStr);
   // UX Sprint: 当前学科的自定义分类（只显示当前学科，隔离其他学科分类）
@@ -297,7 +299,9 @@ export default function Home() {
     setActiveView("dashboard");
     setActiveDashboardPanel("review");
     const day = studyDays.find((item) => item.date === date);
-    setNotice(day ? `已打开 ${date} 的复盘记录` : `${date} 暂无学习记录`);
+    setNotice(day
+      ? `已打开 ${date} 的复盘记录（完成 ${day.completed} 项 · ${day.minutes} 分钟）`
+      : `${date} 暂无学习记录`);
   }
 
   // ─── Dashboard: Hydration effect ───
@@ -389,26 +393,12 @@ export default function Home() {
         setActiveSessionId(restoredSessionId);
         activeSessionIdRef.current = restoredSessionId;
       } else if (data.chat) {
-        const migratedChat = (data.chat as unknown[]).map((item, index) => {
-          const m = item as { id?: string; role?: string; text?: string; content?: string; createdAt?: string; updatedAt?: string; messageType?: string };
-          return {
-            id: m.id || `m-${Date.now()}-${index}`,
-            role: (m.role === "user" || m.role === "assistant" || m.role === "system") ? m.role : "assistant",
-            content: m.content ?? m.text ?? "",
-            createdAt: m.createdAt || new Date().toISOString(),
-            updatedAt: m.updatedAt,
-            messageType: (m.messageType === "chat" || m.messageType === "action" || m.messageType === "record") ? m.messageType : "chat",
-          } as AgentMessage;
-        });
-        const legacySession: ChatSession = {
-          id: `s-${Date.now()}-legacy`,
-          title: "对话历史",
-          createdAt: new Date().toISOString(),
-          messages: migratedChat,
-        };
-        setChatSessions([legacySession]);
-        setActiveSessionId(legacySession.id);
-        activeSessionIdRef.current = legacySession.id;
+        const legacySession = migrateLegacyChat(data.chat);
+        if (legacySession) {
+          setChatSessions([legacySession]);
+          setActiveSessionId(legacySession.id);
+          activeSessionIdRef.current = legacySession.id;
+        }
       }
       // Stabilization 1B-1: 恢复已保存的复盘（刷新后再打开 ReviewDialog 可见）
       if (data.review) setReview(data.review);
@@ -493,50 +483,14 @@ export default function Home() {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // ─── P4 Phase 1: 提交复盘 → 由规则引擎解析并追加到历史记录 ───
-  // 使用 memory-rules 的 extractReviewFields（与记忆引擎同一套离线规则）生成结构化字段
+  // 使用 reviews.buildStructuredReview（内部复用 memory-rules.extractReviewFields 规则）
   const handleReviewSubmit = () => {
     // P2 交互修复（深入审查 2026-08-01）：无内容时不产生空复盘记录
-    if (!review.done.trim() && !review.hard.trim()) {
+    const structured = buildStructuredReview(review);
+    if (!structured) {
       setNotice("请至少填写「完成了什么」或「最困难的部分」");
       return;
     }
-    const parsed = extractReviewFields({
-      done: review.done,
-      hard: review.hard,
-      overload: review.load,
-      availableTime: review.tomorrow,
-      priority: review.priority,
-    });
-    const now = new Date().toISOString();
-    const aiSummary = [
-      review.done.trim() ? `完成内容：${review.done.trim()}` : "",
-      review.hard.trim() ? `困难点：${review.hard.trim()}` : "",
-      parsed.loadLevel === "过少" ? "计划负荷偏少，可适当加量。" : parsed.loadLevel === "过多" ? "计划负荷偏重，建议精简。" : "计划负荷适中。",
-    ].filter(Boolean).join(" ");
-    const structured: StructuredReview = {
-      id: makeId("sr"),
-      sourceId: `review-${Date.now()}`,
-      date: now,
-      rawInput: {
-        done: review.done,
-        hard: review.hard,
-        overload: review.load,
-        availableTime: review.tomorrow,
-        priority: review.priority,
-      },
-      parsed: {
-        content: parsed.content,
-        completionRates: parsed.content.map(() => 100),
-        difficulty: parsed.difficulty,
-        emotion: "正常",
-        confidence: 60,
-        availableMinutes: parsed.availableMinutes,
-        loadLevel: parsed.loadLevel,
-      },
-      knowledgeImpact: [],
-      aiSummary: aiSummary || "今日复盘已记录。",
-      createdAt: now,
-    };
     setStructuredReviews((items) => [structured, ...items]);
     setNotice("复盘已保存并加入历史记录");
     setActiveDialog(null);
@@ -556,62 +510,17 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [lastDeleted]);
 
-  // ─── Heatmap derived values ───
+  // ─── Heatmap derived values（纯计算抽到 lib/heatmap.ts）───
   const confirmedQuestions = questions.filter((q) => q.confirmed).length;
   const heatmapStart = exam.examGoalCreatedAt ?? hydratedTodayStr;
   const heatmapEnd = exam.examDate >= hydratedTodayStr ? exam.examDate : hydratedTodayStr;
-  const heatmapDates = dateRange(heatmapStart, heatmapEnd);
-  const heatmapDays = heatmapDates.map((date) => {
-    const dayData = studyDays.find((d) => d.date === date);
-    return { date, completed: dayData?.completed ?? 0, minutes: dayData?.minutes ?? 0 };
-  });
-  const heatmapTotalDays = heatmapDays.length;
-  const monthNames = ["", "1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
-  const heatmapStartFormatted = `${heatmapStart.split("-")[0]}.${heatmapStart.split("-")[1]}.${heatmapStart.split("-")[2]}`;
-  const startDayOfWeek = new Date(heatmapStart).getDay();
-  const monBasedOffset = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
-  const totalSlots = heatmapTotalDays + monBasedOffset;
-  const heatmapWeeks = Math.ceil(totalSlots / 7);
-  const heatmapGrid: ({ date: string; completed: number; minutes: number } | null)[][] = [];
-  for (let w = 0; w < heatmapWeeks; w++) {
-    const week: ({ date: string; completed: number; minutes: number } | null)[] = [];
-    for (let d = 0; d < 7; d++) {
-      const slotIndex = w * 7 + d;
-      if (slotIndex < monBasedOffset) {
-        week.push(null);
-      } else {
-        const dayIndex = slotIndex - monBasedOffset;
-        if (dayIndex < heatmapTotalDays) {
-          week.push(heatmapDays[dayIndex]);
-        }
-      }
-    }
-    heatmapGrid.push(week);
-  }
+  const { days: heatmapDays } = buildHeatmapDays(heatmapStart, heatmapEnd, studyDays);
+  const heatmapStartFormatted = formatHeatmapStart(heatmapStart);
+  const monBasedOffset = monBasedOffsetOf(heatmapStart);
+  const { grid: heatmapGrid, months: heatmapMonths } = buildHeatmapGrid(heatmapDays, monBasedOffset);
   const todayStr = hydratedTodayStr;
-  const dayLabels: string[] = [];
-  const weekDays = ["一", "二", "三", "四", "五"];
-  for (let i = 0; i < 7; i++) {
-    if (i > 0 && i < 6) dayLabels.push(weekDays[i - 1]);
-    else dayLabels.push("");
-  }
-  const heatmapMonths: { label: string; colSpan: number }[] = [];
-  heatmapGrid.forEach((week) => {
-    const firstDay = week.find((d) => d !== null);
-    if (!firstDay) return;
-    const month = new Date(firstDay.date).getMonth() + 1;
-    const prevMonth = heatmapMonths.length > 0 ? heatmapMonths[heatmapMonths.length - 1] : null;
-    if (!prevMonth || prevMonth.label !== monthNames[month]) {
-      heatmapMonths.push({ label: monthNames[month], colSpan: 1 });
-    } else {
-      prevMonth.colSpan++;
-    }
-  });
-  const cardsByDate = cards.reduce<Record<string, number>>((acc, card) => {
-    const d = card.createdAt.slice(0, 10);
-    acc[d] = (acc[d] || 0) + 1;
-    return acc;
-  }, {});
+  const dayLabels = buildHeatmapDayLabels();
+  const cardsByDate = countCardsByDate(cards);
 
   // --- Computed values for Sidebar ---
   const daysLeft = hydratedDaysLeft;
@@ -634,7 +543,7 @@ export default function Home() {
     let sessionId = activeSessionIdRef.current;
     if (!sessionId) {
       sessionId = makeId("s");
-      setChatSessions((prev) => [{ id: sessionId, title: "新对话", createdAt: new Date().toISOString(), messages: [], status: "active" }, ...prev]);
+      setChatSessions((prev) => [createChatSession(sessionId), ...prev]);
       setActiveSessionId(sessionId);
       activeSessionIdRef.current = sessionId;
     }
@@ -643,7 +552,7 @@ export default function Home() {
 
   function newChatSession() {
     const sessionId = makeId("s");
-    setChatSessions((prev) => [{ id: sessionId, title: "新对话", createdAt: new Date().toISOString(), messages: [], status: "active" }, ...prev]);
+    setChatSessions((prev) => [createChatSession(sessionId), ...prev]);
     setActiveSessionId(sessionId);
     activeSessionIdRef.current = sessionId;
     setChatHistoryOpen(false);
@@ -654,16 +563,12 @@ export default function Home() {
   // 系统通知默认进入当前 Session 的「系统记录」折叠区，不与 AI 对话混排
   function pushAssistant(text: string, messageType: NonNullable<AgentMessage["messageType"]> = "chat") {
     const sessionId = ensureChatSession();
-    setChatSessions((items) => items.map((s) => s.id === sessionId
-      ? { ...s, messages: [...s.messages, { id: makeId("m"), role: "assistant", content: text, createdAt: new Date().toISOString(), messageType }] }
-      : s));
+    setChatSessions((items) => appendMessage(items, sessionId, createMessage("assistant", text, messageType)));
     setNotice(text);
   }
   function pushSystem(text: string, messageType: "action" | "record" = "action") {
     const sessionId = ensureChatSession();
-    setChatSessions((items) => items.map((s) => s.id === sessionId
-      ? { ...s, messages: [...s.messages, { id: makeId("m"), role: "system", content: text, createdAt: new Date().toISOString(), messageType }] }
-      : s));
+    setChatSessions((items) => appendMessage(items, sessionId, createMessage("system", text, messageType)));
     setNotice(text);
   }
 
@@ -1658,73 +1563,81 @@ export default function Home() {
     if (!text) return;
     // UX Sprint P0: 用户消息写入当前 Session（无 Session 时自动创建；发送即标记为「正在学习」）
     const sessionId = ensureChatSession();
-    setChatSessions((items) => items.map((s) => s.id === sessionId
-      ? { ...s, title: s.title === "新对话" ? text.slice(0, 20) : s.title, status: "active", messages: [...s.messages, { id: makeId("m"), role: "user", content: text, createdAt: new Date().toISOString(), messageType: "chat" }] }
-      : s));
+    setChatSessions((items) => {
+      const userMessage = createMessage("user", text);
+      return appendMessage(items, sessionId, userMessage).map((s) => s.id === sessionId
+        ? { ...s, title: s.title === "新对话" ? text.slice(0, 20) : s.title, status: "active" }
+        : s);
+    });
     setChatInput("");
-    // REVIEW_v6 P2：笔记/总结分支必须优先于「今天/学什么」——「把今天整理成笔记」含「今天」
-    // 若「今天」分支在前会被误转发为「生成今日计划」。笔记分支提前后该快速 prompt 正确进笔记分支。
-    if (text.includes("笔记") || text.includes("总结")) {
-      setNotes((items) => [{ id: makeId("n"), title: "AI 生成笔记", body: "今日重点：先判断过程类型，再选择熵变公式。", tags: ["AI笔记", "热力学"] }, ...items]);
-      pushAssistant("已生成成长笔记。");
-      return;
-    }
-    if (text.includes("今天") || text.includes("学什么")) {
-      runPlanGeneration();
-      return;
-    }
-    if (text.includes("分析") && text.includes("真题") && (text.includes("更新") || text.includes("重排"))) {
-      runAgentWorkflow(text);
-      return;
-    }
-    if (text.includes("分析") && text.includes("真题")) {
-      runExamAnalysis(currentSubject?.name ?? "");
-      return;
-    }
-    if (text.includes("化学势") || (text.includes("真题") && text.includes("找"))) {
-      searchQuestionsFromPrompt(text);
-      return;
-    }
-    if (text.includes("傅献彩") || text.includes("哪里讲")) {
-      const resource = resources.find((item) => item.name.includes("傅献彩"));
-      if (resource) {
-        setActiveResourceId(resource.id);
-        setActiveKnowledgeSubject(resource.subject);
-        setActiveKnowledgePanel("resources"); // Stabilization 1B-4: 真正进入 resources/Reader，而非 landing
-        setReaderPage("132");
-        setActiveView("knowledge");
-        setNotice(`已打开：${resource.name} P132-140`);
-        pushAssistant(`傅献彩《物理化学》第六版 P132-140 已关联到 热力学 / 熵与熵变 / 熵变计算。`);
-      } else {
-        pushAssistant("未找到傅献彩相关资源。");
+    // REVIEW_v6 P2：意图路由抽到 lib/chat.classifyPromptIntent
+    // 「把今天整理成笔记」必命中 notes（笔记分支优先于「今天/学什么」）
+    const intent = classifyPromptIntent(text);
+    switch (intent.type) {
+      case "notes": {
+        setNotes((items) => [{ id: makeId("n"), title: "AI 生成笔记", body: "今日重点：先判断过程类型，再选择熵变公式。", tags: ["AI笔记", "热力学"] }, ...items]);
+        pushAssistant("已生成成长笔记。");
+        return;
       }
-      return;
+      case "plan": {
+        runPlanGeneration();
+        return;
+      }
+      case "agent-workflow": {
+        runAgentWorkflow(text);
+        return;
+      }
+      case "exam-analysis": {
+        runExamAnalysis(currentSubject?.name ?? "");
+        return;
+      }
+      case "search-questions": {
+        searchQuestionsFromPrompt(text);
+        return;
+      }
+      case "fu-suggest": {
+        const resource = resources.find((item) => item.name.includes("傅献彩"));
+        if (resource) {
+          setActiveResourceId(resource.id);
+          setActiveKnowledgeSubject(resource.subject);
+          setActiveKnowledgePanel("resources"); // Stabilization 1B-4: 真正进入 resources/Reader，而非 landing
+          setReaderPage("132");
+          setActiveView("knowledge");
+          setNotice(`已打开：${resource.name} P132-140`);
+          pushAssistant(`傅献彩《物理化学》第六版 P132-140 已关联到 热力学 / 熵与熵变 / 熵变计算。`);
+        } else {
+          pushAssistant("未找到傅献彩相关资源。");
+        }
+        return;
+      }
+      case "mistake-analysis": {
+        runMistakeAnalysis(currentSubject?.name ?? "");
+        return;
+      }
+      case "review-cards": {
+        setActiveView("cards");
+        setCardSubjectView(activeCardSubject || currentSubject?.name || subjects[0]?.name || "");
+        setActiveCardCategory(ALL_GROUPS);
+        setCardSubView("待复习");
+        pushAssistant(`已进入 ${activeCardSubject || currentSubject?.name || "当前科目"} 的成长卡片复习。`);
+        return;
+      }
+      case "create-card": {
+        createCardFromText("AI对话", text);
+        setActiveView("cards");
+        setCardSubjectView(activeCardSubject || currentSubject?.name || "");
+        setActiveCardCategory(ALL_GROUPS);
+        setCardSubView("待复习");
+        return;
+      }
+      case "round-info": {
+        pushAssistant(`当前主要科目处于 ${currentSubject?.round ?? "第一轮"}，${currentSubject?.layer ?? "第 1 层"}。`);
+        return;
+      }
+      default:
+        pushAssistant("已收到。可以继续让我安排任务、检索真题、生成笔记或调整图谱。");
+        return;
     }
-    if (text.includes("错") || text.includes("不会")) {
-      runMistakeAnalysis(currentSubject?.name ?? "");
-      return;
-    }
-    if (text.includes("复习")) {
-      setActiveView("cards");
-      setCardSubjectView(activeCardSubject || currentSubject?.name || subjects[0]?.name || "");
-      setActiveCardCategory(ALL_GROUPS);
-      setCardSubView("待复习");
-      pushAssistant(`已进入 ${activeCardSubject || currentSubject?.name || "当前科目"} 的成长卡片复习。`);
-      return;
-    }
-    if (text.includes("卡片") || text.includes("填空卡") || text.includes("公式卡")) {
-      createCardFromText("AI对话", text);
-      setActiveView("cards");
-      setCardSubjectView(activeCardSubject || currentSubject?.name || "");
-      setActiveCardCategory(ALL_GROUPS);
-      setCardSubView("待复习");
-      return;
-    }
-    if (text.includes("第几轮")) {
-      pushAssistant(`当前主要科目处于 ${currentSubject?.round ?? "第一轮"}，${currentSubject?.layer ?? "第 1 层"}。`);
-      return;
-    }
-    pushAssistant("已收到。可以继续让我安排任务、检索真题、生成笔记或调整图谱。");
   }
 
   function addLog(input: string, output: string, accepted = "自动生成", dataRead = ["考试日期", "科目状态", "学习历史", "高风险节点"]) {

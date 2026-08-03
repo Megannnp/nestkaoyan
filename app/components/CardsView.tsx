@@ -230,47 +230,6 @@ export function CardsView() {
                   ))}
                 </div>
 
-                {/* REVIEW_v6 P1: 卡片组重命名内联编辑框（抽取 WorkspaceContext 时只传 setter 未传 value，点击无响应；现补消费端 UI） */}
-                {renamingCardId && (
-                  <div className="mb-4 p-3 rounded-[8px] border border-[#E4E4E7] bg-white flex items-center gap-2">
-                    <strong className="text-[12px] text-[#18181B] shrink-0">重命名卡片组</strong>
-                    <input
-                      autoFocus
-                      className="min-h-[34px] text-[13px] px-3 rounded-[8px] border border-[#D4D4D8] bg-white focus:outline-none focus:ring-2 focus:ring-[#18181B]/10 flex-1"
-                      value={renamingCardName}
-                      maxLength={30}
-                      onChange={(e) => setRenamingCardName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          const name = renamingCardName.trim().slice(0, 30);
-                          if (!name) { setNotice("名称不能为空"); return; }
-                          if (subjectCategories.some((c) => c.id !== renamingCardId && c.name === name)) { setNotice("卡片组名称已存在"); return; }
-                          setCategories((items) => items.map((c) => c.id === renamingCardId ? { ...c, name, updatedAt: today() } : c));
-                          setNotice(`已重命名卡片组：${name}`);
-                          setRenamingCardId(null);
-                        }
-                        if (e.key === "Escape") setRenamingCardId(null);
-                      }}
-                    />
-                    <button
-                      className="min-h-[32px] px-3 rounded-[8px] bg-[#18181B] text-white font-bold text-[12px]"
-                      onClick={() => {
-                        const name = renamingCardName.trim().slice(0, 30);
-                        if (!name) { setNotice("名称不能为空"); return; }
-                        if (subjectCategories.some((c) => c.id !== renamingCardId && c.name === name)) { setNotice("卡片组名称已存在"); return; }
-                        setCategories((items) => items.map((c) => c.id === renamingCardId ? { ...c, name, updatedAt: today() } : c));
-                        setNotice(`已重命名卡片组：${name}`);
-                        setRenamingCardId(null);
-                      }}
-                    >保存</button>
-                    <button
-                      className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#71717A] font-bold text-[12px]"
-                      onClick={() => setRenamingCardId(null)}
-                    >取消</button>
-                  </div>
-                )}
-
                 {/* ─── 信息架构（2026-08-01）：状态筛选 × 分组方式 两个独立维度 ─── */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4">
                   <div className="flex items-center gap-1.5">
@@ -433,6 +392,47 @@ export function CardsView() {
               </>
             )}
 
+            {/* REVIEW_v6 P1: 卡片组重命名内联编辑框（section 根级渲染：首页网格与学科内学习空间均可触发并看到编辑框） */}
+            {renamingCardId && (
+              <div className="mb-4 p-3 rounded-[8px] border border-[#E4E4E7] bg-white flex items-center gap-2">
+                <strong className="text-[12px] text-[#18181B] shrink-0">重命名卡片组</strong>
+                <input
+                  autoFocus
+                  className="min-h-[34px] text-[13px] px-3 rounded-[8px] border border-[#D4D4D8] bg-white focus:outline-none focus:ring-2 focus:ring-[#18181B]/10 flex-1"
+                  value={renamingCardName}
+                  maxLength={30}
+                  onChange={(e) => setRenamingCardName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const name = renamingCardName.trim().slice(0, 30);
+                      if (!name) { setNotice("名称不能为空"); return; }
+                      if (subjectCategories.some((c) => c.id !== renamingCardId && c.name === name)) { setNotice("卡片组名称已存在"); return; }
+                      setCategories((items) => items.map((c) => c.id === renamingCardId ? { ...c, name, updatedAt: today() } : c));
+                      setNotice(`已重命名卡片组：${name}`);
+                      setRenamingCardId(null);
+                    }
+                    if (e.key === "Escape") setRenamingCardId(null);
+                  }}
+                />
+                <button
+                  className="min-h-[32px] px-3 rounded-[8px] bg-[#18181B] text-white font-bold text-[12px]"
+                  onClick={() => {
+                    const name = renamingCardName.trim().slice(0, 30);
+                    if (!name) { setNotice("名称不能为空"); return; }
+                    if (subjectCategories.some((c) => c.id !== renamingCardId && c.name === name)) { setNotice("卡片组名称已存在"); return; }
+                    setCategories((items) => items.map((c) => c.id === renamingCardId ? { ...c, name, updatedAt: today() } : c));
+                    setNotice(`已重命名卡片组：${name}`);
+                    setRenamingCardId(null);
+                  }}
+                >保存</button>
+                <button
+                  className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#71717A] font-bold text-[12px]"
+                  onClick={() => setRenamingCardId(null)}
+                >取消</button>
+              </div>
+            )}
+
             {/* 专注模式（统一使用 CardViewer 导出的 FocusMode 组件，单一实现；Escape 关闭 + 遮罩防误触） */}
             {focusMode && activeGroupCard && cardSubjectView && (
               <FocusMode
@@ -466,6 +466,12 @@ export function CardsView() {
                         onClick={() => {
                           setCards((items) => items.map((c) => c.categoryId === deletingCardId ? { ...c, categoryId: undefined } : c));
                           setCategories((items) => items.filter((c) => c.id !== deletingCardId));
+                          // 删除的是当前正在学习的分类 → 重置为「全部卡片」，避免 activeCardCategory 指向已删除 id 导致空列表
+                          if (activeCardCategory === deletingCardId) {
+                            setActiveCardCategory(ALL_GROUPS);
+                            setCardIndex(0);
+                            setCardFlipped(false);
+                          }
                           setNotice("已删除卡片组（卡片已归入未分类）");
                           setDeletingCardId(null);
                         }}

@@ -4,10 +4,11 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { Resource, Question, Annotation, AnnotationTag, KnowledgeNode } from "../lib/types";
 import {
   ANNOTATION_COLORS, UNKNOWN_ANNOTATION_TAG, UNKNOWN_ANNOTATION_COLOR,
-  resolveAnnotationColor, isAnnotationTag,
+  resolveAnnotationColor, isAnnotationTag, NEW_ANNOTATION_TAGS,
 } from "../lib/types";
 import { loadPdfBlob } from "../lib/pdf-storage";
-import { generatePageContent, generateAiHint, searchInContent, ensurePdfWorker } from "./reader-content";
+import { chatCompleteStream, chatErrorReason } from "../lib/ai/chat-complete";
+import { generatePageContent, searchInContent, ensurePdfWorker } from "./reader-content";
 import styles from "../../styles/components.module.css";
 
 interface ReaderPanelProps {
@@ -51,6 +52,10 @@ export function ReaderPanel({
   // P3 交互修复：本地短提示（批注表单 / 保存进度 / 搜索无匹配，避免依赖父级 toast 连通性）
   const [noticeText, setNoticeText] = useState<string | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // 2026-08-03 产品修复：AI 阅读助手改为真实 DeepSeek 流式讲解（不再是本地模拟假数据）
+  const [aiStreamText, setAiStreamText] = useState("");
+  const [aiStreaming, setAiStreaming] = useState(false);
+  const aiRunRef = useRef(0);
   const flash = useCallback((text: string) => {
     setNoticeText(text);
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
@@ -61,8 +66,45 @@ export function ReaderPanel({
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pdfTotalPages, setPdfTotalPages] = useState<number | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
+  // 2026-08-04 修复：提取当前页 PDF 真实文本，喂给 AI 讲解/提问（不再"推测"）
+  const [pagePdfText, setPagePdfText] = useState("");
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
+  // 2026-08-04 新功能：PDF 文字层（可选中的透明文字）→ 选中文字成批注
+  const textLayerRef = useRef<HTMLDivElement | null>(null);
+  const textLayerTaskRef = useRef<{ cancel: () => void } | null>(null);
+  const [pdfSelection, setPdfSelection] = useState("");
+
+  // 2026-08-03：AI 讲解流式内容分段渲染（去掉 ** markdown 符号，按换行/句子切段落，便于阅读）
+  function renderAiStreamText(text: string) {
+    const clean = text
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/\*([^*]+)\*/g, "$1")
+      .replace(/^#{1,6}\s*/gm, "")
+      .replace(/`([^`]+)`/g, "$1")
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (!clean.length) return [text];
+    const paragraphs: string[] = [];
+    for (const line of clean) {
+      const sentences = line.split(/(?<=[。！？；])/).map((s) => s.trim()).filter(Boolean);
+      if (sentences.length <= 1) {
+        paragraphs.push(line);
+      } else {
+        let buffer = "";
+        for (const sentence of sentences) {
+          buffer += sentence;
+          if (buffer.length >= 40 || /[。！？；]$/.test(sentence)) {
+            paragraphs.push(buffer.trim());
+            buffer = "";
+          }
+        }
+        if (buffer.trim()) paragraphs.push(buffer.trim());
+      }
+    }
+    return paragraphs;
+  }
 
   const annotationCount = subjectAnnotations.length;
   const currentPage = Number(readerPage) || 1;
@@ -75,11 +117,79 @@ export function ReaderPanel({
     [activeResource, subjectNodes, relatedQuestions, currentPage]
   );
 
-  // Generate dynamic AI hint
-  const aiHint = useMemo(() =>
-    generateAiHint(activeResource, subjectNodes, relatedQuestions, currentPage),
-    [activeResource, subjectNodes, relatedQuestions, currentPage]
-  );
+  // 2026-08-04 清理：本地规则概览（generateAiHint）已无 UI 消费，移除死代码
+  // （讲解/提问均使用真实 DeepSeek + 当前页 PDF 真实文本 pagePdfText）
+
+  // 2026-08-03：真实 AI 讲解本页（SSE 流式打字机；失败降级展示原因）
+  async function askAiExplain(options?: { silent?: boolean }) {
+    const runId = aiRunRef.current + 1;
+    aiRunRef.current = runId;
+    if (!options?.silent) setAiStreamText("");
+    setAiStreaming(true);
+    const subject = activeResource.subject || "当前科目";
+    const knowledge = activeResource.linkedNode?.split("/")[2]?.trim() || activeResource.name || "本页内容";
+    const relatedDesc = relatedQuestions.slice(0, 5).map((q) => `${q.year}年#${q.number}：${q.stem}`).join("；") || "暂无";
+    const weakNodes = subjectNodes.filter((n) => n.reviewRisk === "高风险").slice(0, 3).map((n) => n.knowledge).join("、") || "无";
+    const system = "你是「筑巢考研工作台」的 AI 阅读助手。要求：1) 简明扼要，直接给出重点结论；2) 不超过 250 字；3) 不要客套话、不要免责声明、不要推测式铺垫；4) 用小标题列出 2-4 个要点；5) 每个要点后引用原文短句作为依据，格式「引文：「…」」。必须基于给定原文内容，严禁编造。";
+    const user = `我正在阅读：《${activeResource.name}》（${subject}），第 ${currentPage} 页。\n本页原文：${pagePdfText || "（未提取到文字，可能是扫描版 PDF）"}\n本页知识点：${knowledge}\n高风险知识点：${weakNodes}\n关联真题：${relatedDesc}\n请基于原文讲重点：本页核心概念 / 适用条件 / 易错点。每点注明原文引文。`;
+    await chatCompleteStream({
+      system,
+      user,
+      onDelta: (delta) => {
+        if (aiRunRef.current !== runId) return;
+        setAiStreamText((prev) => prev + delta);
+      },
+      onDone: (result) => {
+        if (aiRunRef.current !== runId) return;
+        if (!result.ok || !result.content) {
+          setAiStreamText(`（AI 讲解暂不可用：${chatErrorReason(result.error)}）`);
+        }
+        setAiStreaming(false);
+      },
+    });
+  }
+
+  // 2026-08-03：AI 助手展开 / 页码变化时自动发起讲解——每翻一页都重新讲解「这一页」内容
+  const aiAutoFiredRef = useRef(0);
+  useEffect(() => {
+    if (aiExpanded && !aiStreaming && aiAutoFiredRef.current !== currentPage) {
+      aiAutoFiredRef.current = currentPage;
+      void askAiExplain({ silent: false });
+    }
+    // 页码变化时重新发起，避免「切换第二页 AI 还在讲第一页」
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiExpanded, currentPage]);
+
+  // 2026-08-03：AI 助手旁直接提问（就地流式回答，不跳转）
+  const [aiQuestion, setAiQuestion] = useState("");
+  async function askAiQuestion() {
+    const question = aiQuestion.trim();
+    if (!question || aiStreaming) return;
+    const runId = aiRunRef.current + 1;
+    aiRunRef.current = runId;
+    setAiStreamText("");
+    setAiStreaming(true);
+    setAiQuestion("");
+    const subject = activeResource.subject || "当前科目";
+    const knowledge = activeResource.linkedNode?.split("/")[2]?.trim() || activeResource.name || "本页内容";
+    const system = "你是「筑巢考研工作台」的 AI 阅读助手。要求：1) 简明扼要直接回答；2) 不超过 300 字；3) 不要客套话；4) 可结合当前阅读上下文。严禁编造。";
+    const user = `我正在阅读：《${activeResource.name}》（${subject}），第 ${currentPage} 页。\n本页原文：${pagePdfText || "（未提取到文字，可能是扫描版 PDF）"}\n本页知识点：${knowledge}。\n问题：${question}`;
+    await chatCompleteStream({
+      system,
+      user,
+      onDelta: (delta) => {
+        if (aiRunRef.current !== runId) return;
+        setAiStreamText((prev) => prev + delta);
+      },
+      onDone: (result) => {
+        if (aiRunRef.current !== runId) return;
+        if (!result.ok || !result.content) {
+          setAiStreamText(`（AI 暂不可用：${chatErrorReason(result.error)}）`);
+        }
+        setAiStreaming(false);
+      },
+    });
+  }
 
   const annotationsByTag = useMemo(() => {
     const grouped = subjectAnnotations.reduce<Record<AnnotationTag, Annotation[]> & { unknown: Annotation[] }>(
@@ -126,6 +236,20 @@ export function ReaderPanel({
     setShowNewAnnotation(false);
     flash("批注已添加");
   }, [newAnnotationText, newAnnotationTag, currentPage, onCreateAnnotation, flash]);
+
+  // 2026-08-04：PDF 选中文字 → 预填批注表单（文字层 mouseup 捕获选区）
+  function capturePdfSelection() {
+    const sel = window.getSelection()?.toString().trim() || "";
+    if (sel) setPdfSelection(sel);
+  }
+  function createAnnotationFromSelection() {
+    if (!pdfSelection.trim()) return;
+    setNewAnnotationText(pdfSelection);
+    setNewAnnotationTag("重点");
+    setShowNewAnnotation(true);
+    setPdfSelection("");
+    flash("已选中文字，可调整标签后确认添加");
+  }
 
   // ─── Stabilization 1A-2: PDF 加载（IndexedDB → pdfjs-dist → Blob URL）───
   useEffect(() => {
@@ -193,6 +317,9 @@ export function ReaderPanel({
       // 取消进行中的渲染任务
       renderTaskRef.current?.cancel();
       renderTaskRef.current = null;
+      textLayerTaskRef.current?.cancel();
+      textLayerTaskRef.current = null;
+      setPdfSelection("");
     };
     // 仅当资源本身（id/文件）变化时才重载 PDF；lastOpenedPage 仅在加载当刻读取一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -206,6 +333,7 @@ export function ReaderPanel({
     async function renderPage() {
       setPdfError(null);
       setPdfLoading(true);
+      setPdfSelection("");
       try {
         const blob = await loadPdfBlob(activeResource.fileStorageKey!);
         if (cancelled || !blob) return;
@@ -218,13 +346,47 @@ export function ReaderPanel({
         if (cancelled) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const viewport = page.getViewport({ scale: (Number(readerZoom.replace("%", "")) || 100) / 100 });
+        const baseScale = (Number(readerZoom.replace("%", "")) || 100) / 100;
+        const viewport = page.getViewport({ scale: baseScale });
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
         const renderTask = page.render({ canvasContext: ctx, viewport });
         renderTaskRef.current = renderTask;
+        // 2026-08-04 修复：同步提取当前页真实 PDF 文本（供 AI 讲解/提问，替代"推测"）
+        // 2026-08-04 新功能：叠加可选中的透明文字层（选中文字 → 成批注）
+        try {
+          const content = await page.getTextContent();
+          const text = content.items
+            .map((item) => ("str" in item ? (item as { str: string }).str : ""))
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 3000);
+          if (!cancelled) setPagePdfText(text);
+          // 仅当本页确有文字时叠加文字层（扫描版无文字层跳过，避免空白覆盖）
+          const textLayerEl = textLayerRef.current;
+          if (!cancelled && textLayerEl && content.items.length > 0) {
+            textLayerEl.innerHTML = "";
+            // 文字层尺寸需与 canvas 实际显示尺寸一致（canvas 受 max-width:100% 约束）
+            const rect = canvas.getBoundingClientRect();
+            const cssScale = rect.width > 0 ? rect.width / (viewport.width || 1) : 1;
+            const textViewport = page.getViewport({ scale: baseScale * cssScale });
+            const textLayerTask = new pdfjsLib.TextLayer({
+              textContentSource: content,
+              container: textLayerEl,
+              viewport: textViewport,
+            });
+            textLayerTaskRef.current = textLayerTask;
+            await textLayerTask.render();
+            if (cancelled) textLayerTaskRef.current = null;
+          } else if (!cancelled) {
+            textLayerTaskRef.current = null;
+          }
+        } catch {
+          if (!cancelled) setPagePdfText("");
+        }
         try {
           await renderTask.promise;
         } catch (err) {
@@ -254,6 +416,9 @@ export function ReaderPanel({
       cancelled = true;
       renderTaskRef.current?.cancel();
       renderTaskRef.current = null;
+      textLayerTaskRef.current?.cancel();
+      textLayerTaskRef.current = null;
+      setPdfSelection("");
     };
   }, [isRealPdf, pdfTotalPages, currentPage, readerZoom, activeResource?.fileStorageKey]);
 
@@ -343,7 +508,27 @@ export function ReaderPanel({
                 {pdfLoading && (
                   <p className="text-[12px] text-[#71717A] mb-2">正在加载 PDF…</p>
                 )}
-                <canvas ref={canvasRef} className={styles.readerCanvas} />
+                <div className={styles.pdfPageWrap}>
+                  <canvas ref={canvasRef} className={styles.readerCanvas} />
+                  {/* 2026-08-04：透明文字层覆盖在 canvas 上，文字可选中 → 成批注 */}
+                  <div
+                    ref={textLayerRef}
+                    className={styles.pdfTextLayer}
+                    onMouseUp={capturePdfSelection}
+                  />
+                </div>
+                {/* 2026-08-04：选中文字后的快捷操作条 */}
+                {pdfSelection && (
+                  <div className={styles.pdfSelectionBar}>
+                    <span className={styles.pdfSelectionCount}>已选 {pdfSelection.length} 字</span>
+                    <button className={styles.pdfSelectionBtn} onClick={createAnnotationFromSelection}>
+                      ✏ 存为批注
+                    </button>
+                    <button className={styles.pdfSelectionCancel} onClick={() => setPdfSelection("")}>
+                      取消
+                    </button>
+                  </div>
+                )}
                 {annotationCount > 0 && (
                   <div className="space-y-2 mt-4">
                     {subjectAnnotations.filter((ann) => Number(ann.page) === currentPage).map((ann) => {
@@ -429,8 +614,8 @@ export function ReaderPanel({
               <div className={styles.relatedButtons}>
                 {relatedQuestions.slice(0, 4).map((q) => (
                   <button key={q.id} className={styles.relatedBtn}
-                    onClick={() => onShowRelated(q.core, q.knowledge, q.subject)}>
-                    {q.year} #{q.number}
+                    onClick={() => onShowRelated(q.core, q.knowledge, activeResource.subject)}>
+                    {q.year}年 第{q.number}题
                   </button>
                 ))}
               </div>
@@ -455,13 +640,21 @@ export function ReaderPanel({
           </summary>
           <div className={styles.aiAssistantBody}>
             <p className={styles.aiAssistantText}>
-              <span className={styles.aiAssistantLabel}>本页重点：</span>
-              {aiHint.keyPoint}
+              <span className={styles.aiAssistantLabel}>资料：</span>
+              《{activeResource.name}》· {activeResource.subject} · P{currentPage}
             </p>
-            <p className={`${styles.aiAssistantText} ${styles.aiAssistantTopMargin}`}>
-              <span className={styles.aiAssistantLabel}>考频：</span>
-              {aiHint.examFreq}
-            </p>
+            {subjectNodes.length > 0 && (
+              <p className={`${styles.aiAssistantText} ${styles.aiAssistantTopMargin}`}>
+                <span className={styles.aiAssistantLabel}>本页知识点：</span>
+                {subjectNodes.slice(0, 4).map((n) => n.knowledge).join("、")}
+              </p>
+            )}
+            {relatedQuestions.length > 0 && (
+              <p className={`${styles.aiAssistantText} ${styles.aiAssistantTopMargin}`}>
+                <span className={styles.aiAssistantLabel}>关联真题：</span>
+                {relatedQuestions.slice(0, 3).map((q) => `${q.year}年 第${q.number}题`).join("、")}
+              </p>
+            )}
             <div className={styles.aiAssistantActions}>
               <button className={styles.aiAssistantBtn}
                 onClick={() => onShowRelated("全部", "全部", activeResource.subject)}>
@@ -472,6 +665,54 @@ export function ReaderPanel({
                 🃏 生成卡片
               </button>
             </div>
+            {/* 2026-08-04：展示本页原文，供核对 AI 讲解是否忠于原文（化解"推测"信任问题） */}
+            {pagePdfText && (
+              <details className={`${styles.aiAssistantText} ${styles.aiAssistantTopMargin}`}>
+                <summary className={styles.aiAssistantLabel} style={{ cursor: "pointer" }}>
+                  📄 本页原文（点击展开核对）
+                </summary>
+                <p className={`${styles.contentText} ${styles.aiAssistantTopMargin}`} style={{ color: "rgba(255,255,255,0.8)" }}>
+                  {pagePdfText}
+                </p>
+              </details>
+            )}
+            <div className={`${styles.aiAssistantActions} ${styles.aiAssistantTopMargin}`}>
+              <button className={styles.aiAssistantBtn}
+                disabled={aiStreaming}
+                onClick={() => askAiExplain()}>
+                {aiStreaming ? "💭 AI 讲解中…" : "🤖 AI 讲解本页"}
+              </button>
+            </div>
+            {/* 2026-08-03：AI 助手旁直接提问 */}
+            <div className={`${styles.aiAssistantActions} ${styles.aiAssistantTopMargin}`}>
+              <input
+                className={styles.aiQuestionInput}
+                placeholder="向 AI 提问本页内容…"
+                value={aiQuestion}
+                disabled={aiStreaming}
+                onChange={(e) => setAiQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") askAiQuestion();
+                }}
+              />
+              <button
+                className={styles.aiAssistantBtn}
+                disabled={aiStreaming || !aiQuestion.trim()}
+                onClick={askAiQuestion}
+              >
+                提问
+              </button>
+            </div>
+            {aiStreamText && (
+              <div className={`${styles.aiAssistantText} ${styles.aiAssistantTopMargin}`}>
+                <span className={styles.aiAssistantLabel}>💬 AI：</span>
+                <div className="mt-1 space-y-2">
+                  {renderAiStreamText(aiStreamText).map((para, i) => (
+                    <p key={i} className={styles.contentText}>{para}</p>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </details>
 
@@ -486,7 +727,7 @@ export function ReaderPanel({
               onChange={(e) => setNewAnnotationText(e.target.value)}
             />
             <div className={styles.newAnnotationTagRow}>
-              {(["重点", "疑问", "易错", "总结"] as AnnotationTag[]).map((tag) => (
+              {NEW_ANNOTATION_TAGS.map((tag) => (
                 <button
                   key={tag}
                   className={`${styles.newAnnotationTagBtn} ${newAnnotationTag === tag ? styles.newAnnotationTagBtnActive : ""}`}
@@ -527,7 +768,7 @@ export function ReaderPanel({
         {showAnnotations && (
           <>
             <div className={styles.annotationStatusBar}>
-              {(["重点", "疑问", "易错", "总结"] as AnnotationTag[]).map((tag) => (
+              {NEW_ANNOTATION_TAGS.map((tag) => (
                 <span key={tag} className={styles.annotationTagDot}>
                   <span>{ANNOTATION_COLORS[tag].dot}</span>
                   <span>{tag}</span>

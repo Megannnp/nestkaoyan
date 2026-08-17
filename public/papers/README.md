@@ -13,8 +13,8 @@
 
 ## 政治（politics-YYYY.pdf）
 
-- politics-2003.pdf ~ politics-2026.pdf → 2003—2026 考研政治真题（✅ 24 套全部已上传；2003-2022、2025、2026 有文本层；2023 ⚠️ 解析版、2024 ⚠️ 纯扫描）
-- 政治 2023 另有 `workspace-app/examples/` 下 `.docx`/`.txt` 带题干版（textutil 转换）可供上传阅读
+- politics-2003.pdf ~ politics-2026.pdf → 2003—2026 考研政治真题（✅ 24 套全部已上传，**全部有文本层**）
+- 2026-08-17：`politics-2024.pdf` 经 macOS Vision OCR 生成**带文本层版本**（保留原图 + 透明文本层，可 AI 解析/搜索）；`politics-2023.pdf` 由 `.doc` 转换的带题干文本版替换（原为解析版）
 
 ## 英语一（english-YYYY.pdf）
 

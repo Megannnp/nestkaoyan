@@ -2,19 +2,27 @@
 
 import type { AgentMessage, ChatSession } from "../lib/types";
 import { formatMessageTime } from "../lib/utils";
+import { LatexContent } from "./LatexContent";
 
 /** 消息类型标签与图标 */
 const MESSAGE_TYPE_LABELS: Record<NonNullable<AgentMessage["messageType"]>, { label: string; dot: string; bg: string; border: string }> = {
   chat: { label: "AI 建议", dot: "💡", bg: "#F4F4F5", border: "#E4E4E7" },
   action: { label: "系统操作", dot: "⚙️", bg: "#F5F3FF", border: "#EDE9FE" },
-  record: { label: "数据记录", dot: "📝", bg: "#F0FDF4", border: "#DCFCE7" },
+  record: { label: "数据记录", dot: "📝", bg: "#F4F4F5", border: "#E4E4E7" },
 };
 
-/** 会话状态图标 */
+/** 会话状态图标（2026-08-05：去掉彩色 emoji，改黑白灰中性圆点配色） */
 const SESSION_STATUS_ICONS: Record<NonNullable<ChatSession["status"]>, string> = {
-  active: "🟢",
-  completed: "⚪",
-  paused: "🟡",
+  active: "学习中",
+  completed: "已完成",
+  paused: "已暂停",
+};
+
+/** 会话状态圆点配色（中性黑白灰） */
+export const SESSION_STATUS_DOT: Record<NonNullable<ChatSession["status"]>, string> = {
+  active: "bg-[#18181B]",
+  completed: "bg-[#D4D4D8]",
+  paused: "bg-[#52525B]",
 };
 
 /** 同一分钟内连续的多条系统消息 → 合并显示一次时间 */
@@ -57,41 +65,42 @@ function groupSessions(sessions: ChatSession[]): { label: string; list: ChatSess
   return groups.filter((g) => g.list.length > 0);
 }
 
-/** 单条消息渲染（标准 IM：用户右侧 / AI 左侧 / 系统弱化 / 类型标签 / 新消息动画） */
+/** 单条消息渲染（标准 IM：用户右侧 / AI 左侧 / 系统居中弱化。
+ *  2026-08-05：去掉「AI建议/系统操作/数据记录」类型标签；时间仿微信放气泡外居中，不放气泡内） */
 function MessageBubble({ message, index, sessionMessages }: { message: AgentMessage; index: number; sessionMessages: AgentMessage[] }) {
   const prev = sessionMessages[index - 1];
   const showTime = !(message.role === "system" && prev && prev.role === "system" && sameMinute(message.createdAt, prev.createdAt));
-  const typeInfo = message.messageType ? MESSAGE_TYPE_LABELS[message.messageType] : null;
+  // 同一分钟内上一条消息已显示过时间 → 本条不再重复显示（仿微信合并）
+  const lastNonSystem = [...sessionMessages].slice(0, index).reverse().find((m) => m.role !== "system");
+  const showBubbleTime = !lastNonSystem || !sameMinute(message.createdAt, lastNonSystem.createdAt);
 
   if (message.role === "system") {
     return (
       <div className="flex flex-col items-center my-1.5 message-fade-in">
-        <span className="text-[11px] text-[#A1A1AA] bg-[#F4F4F5] px-2 py-0.5 rounded-full max-w-[85%] text-center leading-snug">
-          {typeInfo?.dot ? `${typeInfo.dot} ` : ""}{message.content}
+        {/* 仿微信：时间居中在气泡外 */}
+        {showTime && <span className="text-[10px] text-[#A1A1AA] mb-1">{formatMessageTime(message.createdAt)}</span>}
+        <span className="text-[11px] text-[#52525B] bg-[#F4F4F5] px-2 py-0.5 rounded-full max-w-[85%] text-center leading-snug">
+          {message.content}
         </span>
-        {showTime && <span className="text-[10px] text-[#D4D4D8] mt-0.5">{formatMessageTime(message.createdAt)}</span>}
       </div>
     );
   }
 
   const isUser = message.role === "user";
-  const roleLabel = isUser ? "我" : (typeInfo?.label ?? "AI");
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-3 message-fade-in`}>
-      <div className={`max-w-[80%] min-w-[120px] rounded-[12px] px-3 py-2 ${isUser ? "bg-[#18181B] text-white rounded-br-[4px]" : "bg-white border border-[#E4E4E7] rounded-bl-[4px]"}`}>
-        <div className="flex items-center gap-1.5 mb-0.5">
-          {!isUser && typeInfo && (
-            <span
-              className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded"
-              style={{ background: typeInfo.bg, color: "#52525B", border: `1px solid ${typeInfo.border}` }}
-            >
-              {typeInfo.dot} {roleLabel}
-            </span>
-          )}
-          {isUser && <span className="text-[10px] text-white/70 font-bold">{roleLabel}</span>}
-          <span className={`text-[10px] ${isUser ? "text-white/60" : "text-[#A1A1AA]"}`}>{formatMessageTime(message.createdAt)}</span>
+    <div className="flex flex-col mb-3 message-fade-in">
+      {/* 仿微信：时间居中在气泡外（同分钟多条只显示第一条时间） */}
+      {showBubbleTime && (
+        <div className="flex justify-center mb-1">
+          <span className="text-[10px] text-[#A1A1AA]">{formatMessageTime(message.createdAt)}</span>
         </div>
-        <p className="text-[13px] whitespace-pre-wrap leading-relaxed">{message.content}</p>
+      )}
+      <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+        <div className={`max-w-[80%] min-w-[60px] rounded-[12px] px-3 py-2 ${isUser ? "bg-[#18181B] text-white rounded-br-[4px]" : "bg-white border border-[#E4E4E7] rounded-bl-[4px]"}`}>
+          <div className="text-[13px] whitespace-pre-wrap leading-relaxed">
+            <LatexContent text={message.content} />
+          </div>
+        </div>
       </div>
     </div>
   );

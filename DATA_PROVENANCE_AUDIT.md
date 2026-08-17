@@ -13,8 +13,8 @@
 | 页面显示 | 当前值示例 | 来源文件 | 来源变量/函数 | 数据类型 | 是否硬编码 | 是否可被用户覆盖 | 是否动态计算 | 是否会同步更新 |
 |---------|-----------|---------|-------------|---------|-----------|---------------|------------|--------------|
 | 剩余天数 | 143 | page.tsx:165 | `daysLeft = Math.max(0, Math.ceil((new Date(exam.examDate).getTime() - Date.now()) / 86400000))` | computed | 否 | 是（通过设置考试日期） | 是 | 是 |
-| 院校名称 | 哈尔滨工业大学重庆研究院 | page.tsx:851 | `exam.school` (seedExam.school) | string | 否（默认值） | 是 | 否 | 是 |
-| 目标专业 | 828 物理化学 | page.tsx:852 | `exam.major` (seedExam.major) | string | 否（默认值） | 是 | 否 | 是 |
+| 院校名称 | 待设置 | page.tsx:851 | `exam.school` (seedExam.school) | string | 否（默认值） | 是 | 否 | 是 |
+| 目标专业 | 数学二 | page.tsx:852 | `exam.major` (seedExam.major) | string | 否（默认值） | 是 | 否 | 是 |
 | 目标总分 | 315 | page.tsx:858 | `totalTargetScore = subjects.reduce((sum, subject) => sum + Number(subject.targetScore \|\| 0), 0)` | computed | 否 | 是 | 是 | 是 |
 | 整体进度% | 57% | page.tsx:859 | `overallProgress` (复杂公式：nodes.masteryScore + questions + resources) | computed | 否 | 否 | 是 | 是 |
 | 当前轮次 | 第一轮 | page.tsx:861 | `currentSubject?.round ?? "第一轮"` | string | 否（但有硬编码fallback "第一轮"） | 是 | 是 | 是 |

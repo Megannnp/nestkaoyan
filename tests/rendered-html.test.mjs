@@ -37,20 +37,13 @@ test("server-renders the kaoyan learning agent workspace", async () => {
   assert.match(html, /今日工作台/);
   assert.match(html, /AI学习助手/);
   assert.match(html, /知识中心/);
-  assert.match(html, /成长卡片/);
+  assert.match(html, /沉淀卡片/);
   assert.match(html, /设置/);
   assert.match(html, /学习记录/);
-  assert.match(html, /第 2 层/);
-  assert.match(html, /第一轮/);
-  assert.match(html, /掌握度/);
-  assert.match(html, /开始学习/);
-  assert.match(html, /记录结果/);
-  assert.match(html, /熵变计算适用条件/);
-  assert.match(html, /828 物理化学/);
-  assert.match(html, /回看：熵变计算适用条件/);
-  assert.match(html, /哈尔滨工业大学/);
-  assert.match(html, /完成 3 道基础辨析题/);
-  assert.match(html, /AI推荐/);
+  // 2026-08-03 产品决定：新用户空白态（不展示虚拟演示数据）
+  assert.match(html, /开始你的学习/);
+  assert.match(html, /去上传资料/);
+  assert.match(html, /先生成计划/);
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton|codex-preview/);
 });
 
@@ -62,15 +55,16 @@ test("dashboard SSR renders sidebar nav and task content", async () => {
   assert.match(html, /今日工作台/);
   assert.match(html, /AI学习助手/);
   assert.match(html, /知识中心/);
-  assert.match(html, /成长卡片/);
+  assert.match(html, /沉淀卡片/);
   assert.match(html, /设置/);
   assert.match(html, /学习记录/); // heatmap section
   assert.match(html, /开始于 /);  // heatmap start date
 
   // Dashboard task panel (default view)
   assert.match(html, /今日任务/);
-  assert.match(html, /回看：熵变计算适用条件/);
-  assert.match(html, /AI推荐/);
+  // 2026-08-03 产品决定：新用户空白态（不展示虚拟演示数据）
+  assert.match(html, /开始你的学习/);
+  assert.match(html, /去上传资料/);
 });
 
 test("knowledge/agent/cards/settings page code exists in page.tsx", async () => {
@@ -82,11 +76,11 @@ test("knowledge/agent/cards/settings page code exists in page.tsx", async () => 
   assert.match(page, /activeView === "knowledge"/);
   assert.match(page, /<KnowledgeView/);
   assert.match(knowledge, /学习资料/);
-  assert.match(knowledge, /真题数据库/);
+  assert.match(knowledge, /真题库/);
   assert.match(knowledge, /知识图谱/);
   assert.match(knowledge, /我的资料库/);
   assert.match(knowledge, /上传资源/);
-  assert.match(knowledge, /打开阅读/);
+  assert.match(knowledge, /← 返回/);
   assert.match(knowledge, /activeKnowledgePanel === "resources"/);
   assert.match(knowledge, /activeKnowledgePanel === "questions"/);
   assert.match(knowledge, /activeKnowledgePanel === "graph"/);
@@ -98,11 +92,13 @@ test("knowledge/agent/cards/settings page code exists in page.tsx", async () => 
 
   // Agent page
   assert.match(page, /activeView === "agent"/);
-  assert.match(page, /runAgentWorkflow/);
-  assert.match(page, /runPrompt/);
-  // UX Sprint 重构后类名为 quick-prompts；今日任务视图已抽出为 DashboardTasksView
-  const dashboard = await readFile(new URL("../app/components/DashboardTasksView.tsx", import.meta.url), "utf8");
-  assert.match(dashboard, /quick-prompts/);
+  // 业务 handlers 已抽到 use-workspace-handlers.ts（page.tsx 经 useWorkspaceHandlers 消费）
+  const workspaceHandlers = await readFile(new URL("../app/use-workspace-handlers.ts", import.meta.url), "utf8");
+  assert.match(workspaceHandlers, /runAgentWorkflow/);
+  assert.match(workspaceHandlers, /runPrompt/);
+  // 2026-08-06 globals.css 大规模迁移：quick-prompts 已移至 components.module.css :global() 声明
+  const componentsCss = await readFile(new URL("../styles/components.module.css", import.meta.url), "utf8");
+  assert.match(componentsCss, /:global\(\.quick-prompts\)/);
 
   // Cards（视图抽出为 CardsView；复习队列逻辑随之迁移）
   const cards = await readFile(new URL("../app/components/CardsView.tsx", import.meta.url), "utf8");
@@ -160,17 +156,19 @@ test("markdown requirements document is generated", async () => {
 });
 
 test("starter preview code has been removed from product entry files", async () => {
-  const [page, layout, packageJson, css] = await Promise.all([
+  const [page, layout, packageJson, css, componentsCss] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../styles/components.module.css", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(page, /SkeletonPreview|_sites-preview|codex-preview/);
   assert.doesNotMatch(layout, /Starter Project|codex-preview|_sites-preview/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(css, /\.hero-grid\s*\{[^}]*display:\s*grid/s);
-  assert.match(css, /\.hero-grid\.agent-only \.engine-panel\s*\{[^}]*display:\s*none/s);
+  // 2026-08-06 globals.css 大规模迁移：布局类已移至 components.module.css :global() 声明
+  assert.match(componentsCss, /:global\(\.hero-grid\.agent-only \.engine-panel\)\s*\{[^}]*display:\s*none/s);
   assert.doesNotMatch(page, /<span>资源名称<\/span>|<span>作者<\/span><input name="author"|<span>版本<\/span><input name="version"/);
 });

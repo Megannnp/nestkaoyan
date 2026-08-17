@@ -13,7 +13,7 @@ import type {
   Subject, GrowthCard, CardCategory, KnowledgeNode, Resource, ActiveDialog,
   KnowledgePanel, WorkspaceView, PendingItem, Annotation, Question,
   Task, AgentStep, AgentMessage, ChatSession, ExamGoal, AppSettings,
-  MasteryText, StudyMood, StudyDraft,
+  MasteryText, StudyMood, StudyDraft, Material, MaterialSection,
 } from "../lib/types";
 import type { LearningEvent } from "../lib/events";
 
@@ -124,6 +124,9 @@ export interface WorkspaceCtx {
   pending: PendingItem[];
   filteredQuestions: Question[];
   relatedQuestions: Question[];
+  resources: Resource[];
+  materials: Material[];
+  materialSections: MaterialSection[];
   subjectResources: Resource[];
   subjectQuestions: Question[];
   subjectNodes: KnowledgeNode[];
@@ -151,6 +154,7 @@ export interface WorkspaceCtx {
   openResourceDialog: () => void;
   closeResourceDialog: () => void;
   startUploadProgress: (file: File, inferred: ResourceInference) => void;
+  startBatchUpload: (files: File[], subjectHint?: string) => Promise<void>;
   addResource: (event: FormEvent<HTMLFormElement>) => void;
   deleteResource: (item: Resource) => void;
   analyzeMaterial: (resource: Resource) => void;

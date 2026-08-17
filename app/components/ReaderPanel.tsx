@@ -6,9 +6,11 @@ import {
   ANNOTATION_COLORS, UNKNOWN_ANNOTATION_TAG, UNKNOWN_ANNOTATION_COLOR,
   resolveAnnotationColor, isAnnotationTag, NEW_ANNOTATION_TAGS,
 } from "../lib/types";
-import { loadPdfBlob } from "../lib/pdf-storage";
+import { loadPdfBlob, loadDocText } from "../lib/pdf-storage";
+import { docxTextToParagraphs } from "../lib/docx-utils";
 import { chatCompleteStream, chatErrorReason } from "../lib/ai/chat-complete";
-import { generatePageContent, searchInContent, ensurePdfWorker } from "./reader-content";
+import { generatePageContent, searchInContent, ensurePdfWorker, getPdfCMapOptions } from "./reader-content";
+import { LatexContent } from "./LatexContent";
 import styles from "../../styles/components.module.css";
 
 interface ReaderPanelProps {
@@ -30,6 +32,8 @@ interface ReaderPanelProps {
   onJumpToPage: (page: string) => void;
   /** 新增批注回调 */
   onCreateAnnotation?: (page: string, selection: string, tag: AnnotationTag, note: string) => void;
+  /** 退出阅读模式（返回书架）——2026-08-17 修复：原「← 返回书架」误用 onSetReaderPage，从未退出 */
+  onExit?: () => void;
 }
 
 export function ReaderPanel({
@@ -38,7 +42,7 @@ export function ReaderPanel({
   onSetReaderSearch, onSetReaderPage, onSetReaderZoom,
   onSaveProgress,
   onShowRelated, onCreateCard, onDeleteAnnotation, onEditAnnotation, onJumpToPage,
-  onCreateAnnotation,
+  onCreateAnnotation, onExit,
 }: ReaderPanelProps) {
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [aiExpanded, setAiExpanded] = useState(false);
@@ -108,7 +112,56 @@ export function ReaderPanel({
 
   const annotationCount = subjectAnnotations.length;
   const currentPage = Number(readerPage) || 1;
-  const isRealPdf = activeResource?.kind === "pdf" && !!activeResource?.fileStorageKey;
+  // 2026-08-06 方案 A：内置真题静态 PDF（public/papers/{fileName}）存在则按原卷渲染；
+  // 文件缺失时 staticPdfOk=false → 保持演示概览。
+  const staticPdfUrl = activeResource?.fileName && activeResource.fileName.toLowerCase().endsWith(".pdf")
+    ? `/papers/${activeResource.fileName}`
+    : null;
+  const [staticPdfOk, setStaticPdfOk] = useState(false);
+  const isRealPdf = (activeResource?.kind === "pdf" && !!activeResource?.fileStorageKey) || staticPdfOk;
+  const isDocx = (activeResource?.kind === "docx" || activeResource?.kind === "text") && !!activeResource?.fileStorageKey;
+  // 2026-08-16：图片资料预览（IndexedDB Blob → objectURL）
+  const isImage = activeResource?.kind === "image" && !!activeResource?.fileStorageKey;
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    if (!isImage || !activeResource?.fileStorageKey) {
+      // 异步清空：避免 effect 内同步 setState 触发级联渲染告警
+      queueMicrotask(() => {
+        if (!cancelled) setImageUrl(null);
+      });
+      return;
+    }
+    (async () => {
+      const blob = await loadPdfBlob(activeResource.fileStorageKey!).catch(() => null);
+      if (!cancelled && blob) {
+        createdUrl = URL.createObjectURL(blob);
+        setImageUrl(createdUrl);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [isImage, activeResource?.fileStorageKey, activeResource?.id]);
+  // 2026-08-05：DOCX 解析文本（按段落分页阅读）
+  const [docxParagraphs, setDocxParagraphs] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!isDocx || !activeResource?.fileStorageKey) {
+      // 异步清空：避免 effect 内同步 setState 触发级联渲染告警
+      queueMicrotask(() => {
+        if (!cancelled) setDocxParagraphs([]);
+      });
+      return;
+    }
+    (async () => {
+      const text = await loadDocText(activeResource.fileStorageKey!).catch(() => "");
+      if (!cancelled) setDocxParagraphs(docxTextToParagraphs(text || ""));
+    })();
+    return () => { cancelled = true; };
+  }, [isDocx, activeResource?.fileStorageKey, activeResource?.id]);
   const maxPages = isRealPdf && pdfTotalPages ? pdfTotalPages : Math.max(1, currentPage + 20); // demo: simulate page range
 
   // Generate dynamic page content
@@ -131,7 +184,8 @@ export function ReaderPanel({
     const relatedDesc = relatedQuestions.slice(0, 5).map((q) => `${q.year}年#${q.number}：${q.stem}`).join("；") || "暂无";
     const weakNodes = subjectNodes.filter((n) => n.reviewRisk === "高风险").slice(0, 3).map((n) => n.knowledge).join("、") || "无";
     const system = "你是「筑巢考研工作台」的 AI 阅读助手。要求：1) 简明扼要，直接给出重点结论；2) 不超过 250 字；3) 不要客套话、不要免责声明、不要推测式铺垫；4) 用小标题列出 2-4 个要点；5) 每个要点后引用原文短句作为依据，格式「引文：「…」」。必须基于给定原文内容，严禁编造。";
-    const user = `我正在阅读：《${activeResource.name}》（${subject}），第 ${currentPage} 页。\n本页原文：${pagePdfText || "（未提取到文字，可能是扫描版 PDF）"}\n本页知识点：${knowledge}\n高风险知识点：${weakNodes}\n关联真题：${relatedDesc}\n请基于原文讲重点：本页核心概念 / 适用条件 / 易错点。每点注明原文引文。`;
+    const docxPageText = isDocx ? (docxParagraphs.slice((currentPage - 1) * 8, currentPage * 8).join("\n") || "（DOCX 无文本）") : "";
+    const user = `我正在阅读：《${activeResource.name}》（${subject}），第 ${currentPage} 页。\n本页原文：${pagePdfText || docxPageText || "（未提取到文字，可能是扫描件）"}\n本页知识点：${knowledge}\n高风险知识点：${weakNodes}\n关联真题：${relatedDesc}\n请基于原文讲重点：本页核心概念 / 适用条件 / 易错点。每点注明原文引文。`;
     await chatCompleteStream({
       system,
       user,
@@ -238,18 +292,46 @@ export function ReaderPanel({
   }, [newAnnotationText, newAnnotationTag, currentPage, onCreateAnnotation, flash]);
 
   // 2026-08-04：PDF 选中文字 → 预填批注表单（文字层 mouseup 捕获选区）
-  function capturePdfSelection() {
+  // 2026-08-05 优化：空选区自动隐藏操作条；点击操作条/表单按钮不触发误清除
+  function capturePdfSelection(e?: React.MouseEvent) {
+    // 点击操作条/表单等控件时不重新捕获（避免按钮点击后被空选区覆盖）
+    if (e) {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(`.${styles.pdfSelectionBar}`) || target?.closest(`.${styles.newAnnotationForm}`)) return;
+    }
     const sel = window.getSelection()?.toString().trim() || "";
-    if (sel) setPdfSelection(sel);
+    if (sel) {
+      setPdfSelection(sel);
+    } else {
+      // 鼠标点击未产生选区 → 清除旧操作条（避免残留误导）
+      setPdfSelection("");
+    }
+  }
+  function clearPdfSelection() {
+    setPdfSelection("");
+    // 同步清空浏览器选区
+    try { window.getSelection()?.removeAllRanges(); } catch { /* noop */ }
   }
   function createAnnotationFromSelection() {
     if (!pdfSelection.trim()) return;
     setNewAnnotationText(pdfSelection);
     setNewAnnotationTag("重点");
     setShowNewAnnotation(true);
-    setPdfSelection("");
+    clearPdfSelection();
     flash("已选中文字，可调整标签后确认添加");
   }
+  // 2026-08-05 优化：Escape 清除 PDF 选区 + 关闭新批注表单（键盘可达性）
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (showNewAnnotation) { setShowNewAnnotation(false); return; }
+        clearPdfSelection();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+     
+  }, [showNewAnnotation]);
 
   // ─── Stabilization 1A-2: PDF 加载（IndexedDB → pdfjs-dist → Blob URL）───
   useEffect(() => {
@@ -259,6 +341,28 @@ export function ReaderPanel({
     async function loadPdf() {
       setPdfError(null);
       setPdfTotalPages(null);
+      if (staticPdfUrl && !activeResource?.fileStorageKey) {
+        try {
+          const resp = await fetch(staticPdfUrl, { headers: { Accept: "application/pdf" } });
+          if (!resp.ok || resp.status === 404) { setStaticPdfOk(false); return; }
+          const blob = await resp.blob();
+          if (cancelled) return;
+          setStaticPdfOk(true);
+          setPdfLoading(true);
+          let pdfjsLib: typeof import("pdfjs-dist") | null = null;
+          try { pdfjsLib = await import("pdfjs-dist"); } catch { if (!cancelled) setPdfError("PDF 解析引擎加载失败"); return; }
+          if (cancelled) return;
+          ensurePdfWorker(pdfjsLib as typeof import("pdfjs-dist"));
+          const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer(), ...getPdfCMapOptions() }).promise;
+          if (cancelled) return;
+          setPdfTotalPages(pdf.numPages);
+          const lastPage = activeResource.lastOpenedPage || "1";
+          const pageNum = Math.min(Math.max(1, Number(lastPage) || 1), pdf.numPages);
+          onSetReaderPage(String(pageNum));
+          setPdfLoading(false);
+          return;
+        } catch { setStaticPdfOk(false); return; }
+      }
       if (!isRealPdf || !activeResource?.fileStorageKey) {
         return;
       }
@@ -287,7 +391,8 @@ export function ReaderPanel({
         if (cancelled) return;
         ensurePdfWorker(pdfjsLib as typeof import("pdfjs-dist"));
         objectUrl = URL.createObjectURL(blob);
-        const pdf = await pdfjsLib.getDocument(objectUrl).promise;
+        // 2026-08-05 修复：中文 PDF 文本提取/渲染必须配置 CMap（否则乱码或空文本）
+        const pdf = await pdfjsLib.getDocument({ url: objectUrl, ...getPdfCMapOptions() }).promise;
         if (cancelled) return;
         setPdfTotalPages(pdf.numPages);
         // 打开资源后跳回上次页码（1A-5）
@@ -323,30 +428,38 @@ export function ReaderPanel({
     };
     // 仅当资源本身（id/文件）变化时才重载 PDF；lastOpenedPage 仅在加载当刻读取一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeResource?.id, activeResource?.fileStorageKey]);
+  }, [activeResource?.id, activeResource?.fileStorageKey, staticPdfUrl]);
 
   // ─── Stabilization 1A-2: 当前页 Canvas 渲染（含 1A-2f 单页渲染失败重试）───
   useEffect(() => {
     let cancelled = false;
-    if (!isRealPdf || !pdfTotalPages || !activeResource?.fileStorageKey) return;
+    if (!isRealPdf || !pdfTotalPages) return;
 
     async function renderPage() {
       setPdfError(null);
       setPdfLoading(true);
       setPdfSelection("");
       try {
-        const blob = await loadPdfBlob(activeResource.fileStorageKey!);
+        const blob = activeResource.fileStorageKey
+          ? await loadPdfBlob(activeResource.fileStorageKey)
+          : staticPdfUrl
+            ? await (await fetch(staticPdfUrl)).blob()
+            : null;
         if (cancelled || !blob) return;
         const pdfjsLib = await import("pdfjs-dist");
         if (cancelled) return;
         ensurePdfWorker(pdfjsLib as typeof import("pdfjs-dist"));
-        const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
+        // 2026-08-05 修复：中文 PDF 文本提取/渲染必须配置 CMap（否则乱码或空文本）
+        const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer(), ...getPdfCMapOptions() }).promise;
         if (cancelled) return;
         const page = await pdf.getPage(Math.min(currentPage, pdf.numPages));
         if (cancelled) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const baseScale = (Number(readerZoom.replace("%", "")) || 100) / 100;
+        // 2026-08-06 清晰度修复：乘以 devicePixelRatio 提升渲染像素密度（真题 PDF 不再糊）
+        const userScale = (Number(readerZoom.replace("%", "")) || 100) / 100;
+        const dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 2) : 2;
+        const baseScale = userScale * dpr;
         const viewport = page.getViewport({ scale: baseScale });
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
@@ -385,7 +498,13 @@ export function ReaderPanel({
             textLayerTaskRef.current = null;
           }
         } catch {
-          if (!cancelled) setPagePdfText("");
+          // 2026-08-05 修复：文字层叠加失败不再清空已成功提取的文本。
+          // 之前 catch 里 setPagePdfText("") 会把 pagePdfText 从"已提取到文本"打成空串，
+          // 导致 AI 讲解/提问拿不到原文；文字层仅是可选选中层，失败不应影响文本提取结果。
+          if (textLayerRef.current) {
+            textLayerRef.current.innerHTML = "";
+            textLayerTaskRef.current = null;
+          }
         }
         try {
           await renderTask.promise;
@@ -420,12 +539,25 @@ export function ReaderPanel({
       textLayerTaskRef.current = null;
       setPdfSelection("");
     };
-  }, [isRealPdf, pdfTotalPages, currentPage, readerZoom, activeResource?.fileStorageKey]);
+  }, [isRealPdf, pdfTotalPages, currentPage, readerZoom, activeResource?.fileStorageKey, staticPdfUrl]);
 
   return (
     <div className={styles.readerGrid}>
       {/* ═══ 左：AI 阅读空间 ═══ */}
       <div className={styles.readerPanel}>
+        {/* ─── 2026-08-06 对齐筑巢人生：顶栏（← 返回｜书名｜页码进度条）─── */}
+        <div className={styles.readerTopBar}>
+          <button className={styles.readerBackBtn} onClick={() => { onSetReaderPage(readerPage); onExit?.(); }}>← 返回书架</button>
+          <div className={styles.readerTopDivider} />
+          <div className={styles.readerTopTitle} title={activeResource.name}>{activeResource.name}</div>
+          <div className={styles.readerTopSpacer} />
+          <div className={styles.readerTopProgress}>
+            <div className={styles.readerProgressTrack}>
+              <div className={styles.readerProgressFill} style={{ width: `${maxPages > 0 ? Math.min(100, Math.round((currentPage / maxPages) * 100)) : 0}%` }} />
+            </div>
+            <span className={styles.readerProgressText}>P{currentPage}/{maxPages}</span>
+          </div>
+        </div>
         {/* 顶部：分页控制器 */}
         <div className={styles.paginationBar}>
           <button
@@ -496,7 +628,7 @@ export function ReaderPanel({
           </div>
         )}
 
-        {/* ═══ 内容区（1A-2g：真实 PDF → canvas；demo → 模拟文本 + 演示标注） ═══ */}
+        {/* ═══ 内容区（1A-2g：真实 PDF → canvas；DOCX → 解析文本；demo → 模拟文本） ═══ */}
         <div className={`${styles.readerContent} ${fontSizeClass}`}>
           {isRealPdf ? (
             pdfError ? (
@@ -524,7 +656,7 @@ export function ReaderPanel({
                     <button className={styles.pdfSelectionBtn} onClick={createAnnotationFromSelection}>
                       ✏ 存为批注
                     </button>
-                    <button className={styles.pdfSelectionCancel} onClick={() => setPdfSelection("")}>
+                    <button className={styles.pdfSelectionCancel} onClick={clearPdfSelection}>
                       取消
                     </button>
                   </div>
@@ -552,10 +684,48 @@ export function ReaderPanel({
                 )}
               </>
             )
+          ) : isImage && imageUrl ? (
+            <>
+              <div className="mb-3 px-2 py-1 rounded-[6px] bg-[#F4F4F5] text-[11px] text-[#71717A] inline-block">
+                🖼️ 图片资料（暂不支持文字选择 / AI 讲解）
+              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element -- 本地 IndexedDB Blob objectURL，无远程图片可优化 */}
+              <img src={imageUrl} alt={activeResource?.name || "图片资料"} className="max-w-full rounded-[8px] border border-[#E4E4E7]" />
+            </>
+          ) : isDocx ? (
+            <>
+              <div className="mb-3 px-2 py-1 rounded-[6px] bg-[#F4F4F5] text-[11px] text-[#71717A] inline-block">
+                📄 {activeResource?.kind === "text" ? "文本文件（TXT / MD）" : "Word 文档（DOCX）"} — 已解析纯文本阅读
+              </div>
+              {docxParagraphs.length > 0 ? (
+                <div className="space-y-3">
+                  {docxParagraphs.slice((currentPage - 1) * 8, currentPage * 8).map((para, i) => {
+                    if (readerSearch.trim()) {
+                      const result = searchInContent(para, readerSearch);
+                      if (result) {
+                        return (
+                          <p key={i} className={styles.contentText}>
+                            {result.before}
+                            <span className={styles.searchHighlight}>{result.match}</span>
+                            {result.after}
+                          </p>
+                        );
+                      }
+                    }
+                    return <p key={i} className={styles.contentText}>{para}</p>;
+                  })}
+                  {readerSearch.trim() && !docxParagraphs.some((para) => searchInContent(para, readerSearch)) && (
+                    <p className={`${styles.contentText} ${styles.readerSearchEmpty}`}>未找到与「{readerSearch}」匹配的内容</p>
+                  )}
+                </div>
+              ) : (
+                <p className={`${styles.contentText} ${styles.readerSearchEmpty}`}>文档暂无可阅读文本（可能为空或解析失败）。</p>
+              )}
+            </>
           ) : (
             <>
               <div className="mb-3 px-2 py-1 rounded-[6px] bg-[#F4F4F5] text-[11px] text-[#71717A] inline-block">
-                📄 演示模式（Demo）— 非真实 PDF 文件，内容由本地数据模拟生成
+                📄 内置真题库 — 已随工作台预置真题内容，可直接练习；上传真实 PDF 后可阅读原卷
               </div>
               {annotationCount > 0 ? (
                 <div className="space-y-2">
@@ -668,10 +838,10 @@ export function ReaderPanel({
             {/* 2026-08-04：展示本页原文，供核对 AI 讲解是否忠于原文（化解"推测"信任问题） */}
             {pagePdfText && (
               <details className={`${styles.aiAssistantText} ${styles.aiAssistantTopMargin}`}>
-                <summary className={styles.aiAssistantLabel} style={{ cursor: "pointer" }}>
+                <summary className={`${styles.aiAssistantLabel} ${styles.aiAssistantLabelPointer}`}>
                   📄 本页原文（点击展开核对）
                 </summary>
-                <p className={`${styles.contentText} ${styles.aiAssistantTopMargin}`} style={{ color: "rgba(255,255,255,0.8)" }}>
+                <p className={`${styles.contentText} ${styles.aiAssistantTopMargin} ${styles.aiAssistantMutedText}`}>
                   {pagePdfText}
                 </p>
               </details>
@@ -708,7 +878,7 @@ export function ReaderPanel({
                 <span className={styles.aiAssistantLabel}>💬 AI：</span>
                 <div className="mt-1 space-y-2">
                   {renderAiStreamText(aiStreamText).map((para, i) => (
-                    <p key={i} className={styles.contentText}>{para}</p>
+                    <p key={i} className={styles.contentText}><LatexContent text={para} /></p>
                   ))}
                 </div>
               </div>
@@ -875,7 +1045,7 @@ export function ReaderPanel({
                   <div key={item.id} className={`${styles.annotationItem} ${styles.annotationInvalidItem}`}
                     onClick={() => onJumpToPage(item.page)}>
                     <div className={styles.annotationItemHead}>
-                      <span className={styles.annotationPage} style={{ color: "#DC2626" }}>P{item.page}</span>
+                      <span className={`${styles.annotationPage} ${styles.annotationPageDanger}`}>P{item.page}</span>
                       <span className={styles.annotationInvalidSpan}>非法标签: {String(item.tag)}</span>
                     </div>
                     <p className={styles.annotationText}>{item.selection}</p>

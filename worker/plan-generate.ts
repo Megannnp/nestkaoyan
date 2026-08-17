@@ -2,18 +2,25 @@
 interface E { DEEPSEEK_API_KEY?: string }
 interface TI { title?: string; subject?: string; core?: string; knowledge?: string; mistakes?: number; risk?: string; masteryScore?: number }
 interface SI { name: string; weeklyHours?: number }
-interface B { subjects: SI[]; knowledge: TI[] }
+interface QI { year?: string; subject?: string; number?: string; core?: string; knowledge?: string; result?: string }
+interface TDI { title?: string; subject?: string; core?: string; minutes?: number; completedAt?: string }
+interface SDI { date?: string; minutes?: number; completed?: number }
+interface B { subjects: SI[]; knowledge: TI[]; questions?: QI[]; tasks?: TDI[]; studyDays?: SDI[] }
 interface GT { title: string; subject: string; core: string; knowledge: string; round: string; layer: string; minutes: number; reason: string; priority: number }
 export interface PlanParsed { summary: string; tasks: GT[] }
 const URL_ = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-chat";
 const TO = 30_000, MAXK = 20, MAXT = 8;
 function j(data: unknown, status = 200): Response { return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8" } }) }
-function msgs(subs: SI[], kn: TI[]) {
+function msgs(subs: SI[], kn: TI[], qs: QI[], done: TDI[], days: SDI[]) {
   const ss = subs.map((s) => `${s.name}${s.weeklyHours ? `（每周${s.weeklyHours}h）` : ""}`).join("、") || "（未设置科目）";
   const kl = kn.slice(0, MAXK).map((k, i) => `${i + 1}. ${k.subject || ""} / ${k.core || ""} / ${k.knowledge || k.title || "未命名"}${k.risk ? ` 风险:${k.risk}` : ""}${typeof k.mistakes === "number" && k.mistakes > 0 ? ` 错题:${k.mistakes}` : ""}${typeof k.masteryScore === "number" ? ` 掌握度:${k.masteryScore}%` : ""}`).join("\n") || "（暂无知识点）";
-  const sys = "你是资深考研辅导专家。根据给定科目的知识点掌握状态/错题/每周时长，生成今日 1-4 个可执行任务。只依据给定内容，严禁编造。优先级：高风险>错题多>掌握度低。每任务≤120分钟。只输出 JSON 对象。";
-  const usr = `考试科目：${ss}\n时间：今日\n知识点状态：\n${kl}\n输出 json：{"summary":"60字内总结","tasks":[{"title":"任务名","subject":"科目","core":"七核","knowledge":"知识点","round":"轮次","layer":"层级","minutes":1-120,"reason":"原因","priority":1}]}。tasks 按 priority 升序至多8条；无依据可返回空数组并在 summary 说明。全部中文。`;
+  // 2026-08-03 增强：真题高频考点 + 学习者状态进 prompt
+  const ql = qs.slice(0, 30).map((q, i) => `${i + 1}. ${q.year || ""} ${q.subject || ""} 第${q.number || ""}题 / ${q.core || ""} / ${q.knowledge || ""}${q.result === "错误" ? "（错）" : q.result === "正确" ? "（对）" : ""}`).join("\n") || "（暂无真题）";
+  const dl = done.slice(0, 20).map((t) => `· ${t.title}${t.subject ? `（${t.subject}）` : ""}${t.minutes ? ` ${t.minutes}分钟` : ""}`).join("\n") || "（今日暂无已完成任务）";
+  const sdl = days.slice(-14).map((d) => `· ${d.date}：${d.minutes ?? 0}分钟 / 完成${d.completed ?? 0}项`).join("\n") || "（暂无学习记录）";
+  const sys = "你是资深考研辅导专家。根据给定科目的知识点掌握状态/错题/每周时长，以及真题覆盖的高频考点和近期学习状态，生成今日 1-4 个可执行任务。只依据给定内容，严禁编造。优先级：真题高频考点且未掌握>高风险>错题多>掌握度低。每任务≤120分钟。只输出 JSON 对象。";
+  const usr = `考试科目：${ss}\n时间：今日\n知识点状态：\n${kl}\n近14天学习记录：\n${sdl}\n今日已完成：\n${dl}\n真题（含做题结果）：\n${ql}\n输出 json：{"summary":"60字内总结","tasks":[{"title":"任务名","subject":"科目","core":"七核","knowledge":"知识点","round":"轮次","layer":"层级","minutes":1-120,"reason":"原因","priority":1}]}。tasks 按 priority 升序至多8条；无依据可返回空数组并在 summary 说明。全部中文。`;
   return [{ role: "system", content: sys }, { role: "user", content: usr }];
 }
 export function parsePlanContent(c: string): PlanParsed {
@@ -45,10 +52,13 @@ export async function handlePlanGenerate(req: Request, env: E): Promise<Response
   const subs = Array.isArray(b?.subjects) ? b.subjects.filter((s) => s && String(s.name || "").trim()) : [];
   const kn = Array.isArray(b?.knowledge) ? b.knowledge.filter((k) => k && (String(k.knowledge || "").trim() || String(k.title || "").trim())) : [];
   if (subs.length === 0 && kn.length === 0) return j({ ok: false, error: "no_context", message: "缺少科目或知识点上下文" }, 400);
+  const qs = Array.isArray(b?.questions) ? b.questions.filter((q) => q && (String(q.knowledge || "").trim() || String(q.core || "").trim())) : [];
+  const done = Array.isArray(b?.tasks) ? b.tasks.filter((t) => t && String(t.title || "").trim()) : [];
+  const days = Array.isArray(b?.studyDays) ? b.studyDays.filter((d) => d && String(d.date || "").trim()) : [];
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), TO);
   try {
-    const resp = await fetch(URL_, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ model: MODEL, messages: msgs(subs, kn), response_format: { type: "json_object" }, temperature: 0.3, max_tokens: 1500 }), signal: ac.signal });
+    const resp = await fetch(URL_, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ model: MODEL, messages: msgs(subs, kn, qs, done, days), response_format: { type: "json_object" }, temperature: 0.3, max_tokens: 1500 }), signal: ac.signal });
     if (!resp.ok) { const detail = await resp.text().catch(() => ""); return j({ ok: false, error: "upstream_error", status: resp.status, message: detail.slice(0, 300) }, 502) }
     const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
     const content = data?.choices?.[0]?.message?.content ?? "";

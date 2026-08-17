@@ -3,6 +3,8 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import type { AppSettings, ExamGoal, Subject } from "../lib/types";
 import { NEW_SUBJECT_TEMPLATE, getDefaultMaxScore } from "../lib/subject-utils";
+import { getStoredApiKey, setStoredApiKey } from "../lib/ai/chat-complete";
+import { chatCompleteStream, chatErrorReason } from "../lib/ai/chat-complete";
 import styles from "../../styles/components.module.css";
 
 interface SettingsPanelProps {
@@ -18,6 +20,9 @@ interface SettingsPanelProps {
   onImportData: (file: File) => Promise<void>;
 }
 
+/** 设置二级页 id（null = 设置首页） */
+type SettingsPage = "goal" | "ai" | "data" | "method" | null;
+
 export function SettingsPanel({
   exam,
   subjects,
@@ -30,53 +35,52 @@ export function SettingsPanel({
   onExportData,
   onImportData,
 }: SettingsPanelProps) {
-  const [showAddForm, setShowAddForm] = useState(false);
+  const [page, setPage] = useState<SettingsPage>(null);
+  // 考试信息编辑态：false=展示信息；true=显示输入框
+  const [examEditing, setExamEditing] = useState(false);
+  // 科目编辑态：正在编辑的科目 id（null=全部展示态）
   const [editingSubjectId, setEditingSubjectId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
   const [newSubject, setNewSubject] = useState<Subject>(NEW_SUBJECT_TEMPLATE());
-  // P3 交互修复（2026-08-01）：科目空名校验提示
   const [subjectNameError, setSubjectNameError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // ─── API Key 配置（与初始化向导一致：保存 + 真实 SSE 连接测试） ───
+  const [apiKey, setApiKey] = useState(() => getStoredApiKey());
+  const [testingKey, setTestingKey] = useState(false);
+  const [keyStatus, setKeyStatus] = useState<{ ok: boolean; text: string } | null>(null);
 
-  // ─── 计算总分 ───
+  const handleTestApiKey = useCallback(async () => {
+    setTestingKey(true);
+    setKeyStatus(null);
+    try {
+      setStoredApiKey(apiKey);
+      let responded = false;
+      const done = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+        void chatCompleteStream({
+          system: "你是连接测试助手。请只回复两个字：正常",
+          user: "连接测试",
+          onDelta: () => { responded = true; },
+          onDone: (r) => resolve(r.ok || responded ? { ok: true } : { ok: false, error: r.error }),
+        });
+      });
+      const result = await done;
+      setKeyStatus(result.ok
+        ? { ok: true, text: "✓ 密钥已保存且连接正常" }
+        : { ok: false, text: `连接失败（${chatErrorReason(result.error)}），密钥已保存` });
+    } catch {
+      setKeyStatus({ ok: false, text: "测试出错，密钥已保存" });
+    } finally {
+      setTestingKey(false);
+    }
+  }, [apiKey]);
+
   const totalTargetScore = useMemo(() =>
     subjects.reduce((sum, s) => sum + (Number(s.targetScore) || 0), 0),
     [subjects]
   );
-  const totalMaxScore = useMemo(() =>
-    subjects.reduce((sum, s) => sum + (Number(s.maxScore) || 0), 0),
-    [subjects]
-  );
 
-  // ─── 字段编辑辅助 ───
-  const validateAndUpdateSubject = useCallback((
-    id: string,
-    field: string,
-    value: string
-  ) => {
-    if (field === "targetScore") {
-      const subject = subjects.find(s => s.id === id);
-      if (!subject) return;
-      const num = Number(value);
-      const max = Number(subject.maxScore);
-      // 不允许超过满分
-      if (value !== "" && (isNaN(num) || num < 0)) return;
-      if (num > max) {
-        onUpdateSubject(id, { targetScore: subject.maxScore });
-        return;
-      }
-    }
-    if (field === "type") {
-      const newMax = getDefaultMaxScore(value);
-      onUpdateSubject(id, { type: value, maxScore: newMax });
-      return;
-    }
-    onUpdateSubject(id, { [field]: value } as Partial<Subject>);
-  }, [subjects, onUpdateSubject]);
-
-  // ─── 新增科目 ───
   const handleAddSubject = useCallback(() => {
-    // P3 交互修复：空名校验 + 重名校验，给出可见提示（不再静默 return）
     if (!newSubject.name.trim()) {
       setSubjectNameError("科目名称不能为空");
       return;
@@ -100,18 +104,16 @@ export function SettingsPanel({
     setShowAddForm(false);
   }, [newSubject, subjects, onAddSubject]);
 
-  // ─── 删除科目 ───
   const handleConfirmDelete = useCallback((id: string) => {
     onRemoveSubject(id);
     setDeleteConfirmId(null);
+    setEditingSubjectId(null);
   }, [onRemoveSubject]);
 
-  // ─── AI 配置：布尔开关切换 ───
   const toggleAISetting = useCallback((field: keyof AppSettings) => {
     onUpdateAppSettings({ [field]: !appSettings[field] } as Partial<AppSettings>);
   }, [appSettings, onUpdateAppSettings]);
 
-  // ─── 数据导入：选中文件 → 交给 page.tsx 处理 ───
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -122,12 +124,9 @@ export function SettingsPanel({
     }
   }, [onImportData]);
 
-  const aiToggleRow = (label: string, field: keyof AppSettings, desc: string) => (
+  const aiToggleRow = (label: string, field: keyof AppSettings) => (
     <label className={styles.aiToggleRow}>
-      <div>
-        <div className={styles.aiToggleLabel}>{label}</div>
-        <div className={styles.aiToggleDesc}>{desc}</div>
-      </div>
+      <div className={styles.aiToggleLabel}>{label}</div>
       <input
         type="checkbox"
         checked={Boolean(appSettings[field])}
@@ -137,91 +136,96 @@ export function SettingsPanel({
     </label>
   );
 
-  // ─── 单个科目编辑内联 ───
+  // ─── 单个科目卡：默认展示信息，点击「编辑」才出现输入框 ───
   const EditableSubjectRow = ({ subject }: { subject: Subject }) => {
     const isEditing = editingSubjectId === subject.id;
     const isPendingDelete = deleteConfirmId === subject.id;
 
     return (
-      <div data-testid={`subject-row-${subject.id}`} className={styles.subjectRowCard}>
-        {/* 头部：名称 + 操作按钮 */}
-        <div className={styles.subjectRowHead}>
-          {isEditing ? (
-            <input
-              className={`${styles.inputField} ${styles.subjectRowInput}`}
-              value={subject.name}
-              onChange={(e) => {
-                const name = e.target.value;
-                if (!name.trim()) {
-                  setSubjectNameError("科目名称不能为空");
-                  return;
-                }
-                setSubjectNameError(null);
-                onUpdateSubject(subject.id, { name });
-              }}
-              placeholder="科目名称"
-            />
-          ) : (
-            <strong className={styles.subjectRowName}>
-              {subject.name || "未命名科目"}
-            </strong>
-          )}
-          <div className={styles.subjectActions}>
-            <button
-              className={`${styles.secondaryBtn} ${styles.btnCompact}`}
-              onClick={() => setEditingSubjectId(isEditing ? null : subject.id)}
-            >
-              {isEditing ? "完成" : "编辑"}
-            </button>
-            {isPendingDelete ? (
-              <>
-                <button
-                  className={`${styles.primaryBtn} ${styles.btnCompact} ${styles.btnDanger}`}
-                  onClick={() => handleConfirmDelete(subject.id)}
-                >
-                  确认删除
-                </button>
-                <button
-                  className={`${styles.secondaryBtn} ${styles.btnCompact}`}
-                  onClick={() => setDeleteConfirmId(null)}
-                >
-                  取消
-                </button>
-              </>
-            ) : (
+      <div data-testid={`subject-row-${subject.id}`} className={styles.subjectCardCompact}>
+        {/* 展示态：名称 + 目标/每周信息 + 编辑按钮 */}
+        {!isEditing && (
+          <>
+            <div className={styles.subjectCardCompactHead}>
+              <strong className={styles.subjectCardCompactName}>
+                {subject.name || "未命名科目"}
+              </strong>
               <button
-                className={`${styles.secondaryBtn} ${styles.btnCompact} ${styles.btnDangerText}`}
-                onClick={() => setDeleteConfirmId(subject.id)}
+                className={`${styles.secondaryBtn} ${styles.btnCompact}`}
+                onClick={() => setEditingSubjectId(subject.id)}
               >
-                删除
+                编辑
               </button>
-            )}
-          </div>
-        </div>
+            </div>
+            <div className={styles.subjectCardCompactStats}>
+              <span>
+                目标 <span className={styles.subjectCardCompactStatValue}>{subject.targetScore}</span>分
+              </span>
+              <span>
+                每周 <span className={styles.subjectCardCompactStatValue}>{subject.weeklyHours}</span>小时
+              </span>
+            </div>
+          </>
+        )}
 
-        {/* 字段网格 */}
-        <div className={styles.settingsGridSubject}>
-          {/* 类型 */}
-          <div>
-            <div className={styles.inputLabel}>类型</div>
-            {isEditing ? (
-              <select
-                className={`${styles.selectBox} ${styles.subjectSelectFull} ${styles.settingsInputMarginSm}`}
-                value={subject.type}
-                onChange={(e) => validateAndUpdateSubject(subject.id, "type", e.target.value)}
-              >
-                <option value="公共课">公共课</option>
-                <option value="专业课">专业课</option>
-              </select>
-            ) : (
-              <div className={styles.valueSmall}>{subject.type}</div>
-            )}
-          </div>
+        {/* 编辑态：输入框 + 保存 / 删除 */}
+        {isEditing && (
+          <>
+            <div className={styles.subjectCardCompactHead}>
+              <strong className={styles.subjectCardCompactName}>
+                编辑 {subject.name || "未命名科目"}
+              </strong>
+              <div className={styles.subjectActions}>
+                <button
+                  className={`${styles.primaryBtn} ${styles.btnCompact}`}
+                  onClick={() => setEditingSubjectId(null)}
+                >
+                  保存
+                </button>
+                {isPendingDelete ? (
+                  <>
+                    <button
+                      className={`${styles.primaryBtn} ${styles.btnCompact} ${styles.btnDanger}`}
+                      onClick={() => handleConfirmDelete(subject.id)}
+                    >
+                      确认删除
+                    </button>
+                    <button
+                      className={`${styles.secondaryBtn} ${styles.btnCompact}`}
+                      onClick={() => setDeleteConfirmId(null)}
+                    >
+                      取消
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className={`${styles.secondaryBtn} ${styles.btnCompact} ${styles.btnDangerText}`}
+                    onClick={() => setDeleteConfirmId(subject.id)}
+                  >
+                    删除
+                  </button>
+                )}
+              </div>
+            </div>
 
-          {/* 目标分数 / 满分 */}
-          <div>
-            <div className={styles.inputLabel}>目标分数</div>
-            {isEditing ? (
+            <div className={styles.subjectEditFields}>
+              <div className={styles.inputLabel}>科目名称</div>
+              <input
+                className={`${styles.inputField} ${styles.subjectRowInput} ${styles.settingsInputMarginSm}`}
+                value={subject.name}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  if (!name.trim()) {
+                    setSubjectNameError("科目名称不能为空");
+                    return;
+                  }
+                  setSubjectNameError(null);
+                  onUpdateSubject(subject.id, { name });
+                }}
+                placeholder="科目名称"
+              />
+
+              <div className={`${styles.inputLabel} ${styles.inputLabelMarginTop}`}>目标分数（满分 {subject.maxScore}）</div>
               <div className={styles.scorePair}>
                 <input
                   className={`${styles.inputField} ${styles.scoreInput}`}
@@ -229,191 +233,163 @@ export function SettingsPanel({
                   min="0"
                   max={subject.maxScore}
                   value={subject.targetScore}
-                  onChange={(e) => validateAndUpdateSubject(subject.id, "targetScore", e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    const num = Number(value);
+                    if (value !== "" && (isNaN(num) || num < 0)) return;
+                    if (num > Number(subject.maxScore)) {
+                      onUpdateSubject(subject.id, { targetScore: subject.maxScore });
+                      return;
+                    }
+                    onUpdateSubject(subject.id, { targetScore: value });
+                  }}
                 />
-                <span className={styles.scoreSlash}>/ {subject.maxScore}</span>
+                <span className={styles.scoreSlash}>/ {subject.maxScore} 分</span>
               </div>
-            ) : (
-              <div className={styles.valueStrong}>
-                {subject.targetScore} / {subject.maxScore}
-              </div>
-            )}
-          </div>
 
-          {/* 轮次 */}
-          <div>
-            <div className={styles.inputLabel}>轮次</div>
-            {isEditing ? (
-              <select
-                className={`${styles.selectBox} ${styles.subjectSelectFull} ${styles.settingsInputMarginSm}`}
-                value={subject.round}
-                onChange={(e) => onUpdateSubject(subject.id, { round: e.target.value })}
-              >
-                {["第一轮", "第二轮", "第三轮", "第四轮", "第五轮", "第六轮"].map(r =>
-                  <option key={r} value={r}>{r}</option>
-                )}
-              </select>
-            ) : (
-              <div className={styles.valueSmall}>{subject.round}</div>
-            )}
-          </div>
-
-          {/* 层级 */}
-          <div>
-            <div className={styles.inputLabel}>层级</div>
-            {isEditing ? (
-              <select
-                className={`${styles.selectBox} ${styles.subjectSelectFull} ${styles.settingsInputMarginSm}`}
-                value={subject.layer}
-                onChange={(e) => onUpdateSubject(subject.id, { layer: e.target.value })}
-              >
-                {["Layer 1", "Layer 2", "Layer 3", "Layer 4"].map(l =>
-                  <option key={l} value={l}>{l}</option>
-                )}
-              </select>
-            ) : (
-              <div className={styles.valueSmall}>{subject.layer}</div>
-            )}
-          </div>
-
-          {/* 每周时长 */}
-          <div>
-            <div className={styles.inputLabel}>每周(h)</div>
-            {isEditing ? (
+              <div className={`${styles.inputLabel} ${styles.inputLabelMarginTop}`}>每周时长（小时）</div>
               <input
                 className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMarginSm}`}
                 value={subject.weeklyHours}
                 onChange={(e) => onUpdateSubject(subject.id, { weeklyHours: e.target.value })}
               />
-            ) : (
-              <div className={styles.valueSmall}>{subject.weeklyHours}h</div>
-            )}
-          </div>
 
-          {/* 风险 */}
-          <div>
-            <div className={styles.inputLabel}>风险状态</div>
-            <div className={`${styles.valueSmall} ${subject.risk === "高风险" ? styles.valueDanger : ""}`}>
-              {subject.risk}
+              {subjectNameError && (
+                <div className={styles.addFormError}>⚠️ {subjectNameError}</div>
+              )}
             </div>
-          </div>
-        </div>
-
-        {/* 当前学习内容（仅在编辑时展开） */}
-        {isEditing && (
-          <div className={styles.currentProgressBlock}>
-            <div className={styles.inputLabel}>当前学习内容</div>
-            <input
-              className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMarginSm}`}
-              value={subject.currentProgress}
-              onChange={(e) => onUpdateSubject(subject.id, { currentProgress: e.target.value })}
-              placeholder="如：热力学第二定律"
-            />
-          </div>
+          </>
         )}
       </div>
     );
   };
 
-  return (
-    <div className={styles.workspacePane}>
-      {/* ═══ 区块1：考试基本信息 ═══ */}
-      <div className={styles.settingsSection}>
-        <div className={styles.sectionLabel}>考试信息</div>
-        <h2 className={styles.settingsH2}>
-          考试与科目设置
-        </h2>
-
-        {/* 顶部：总分目标 — 只读汇总 */}
-        <div className={styles.totalTargetCard}>
-          <div>
-            <div className={styles.totalTargetLabel}>总分目标</div>
-            <div className={`${styles.totalTargetValue} ${totalTargetScore <= totalMaxScore ? styles.totalTargetValueOk : styles.totalTargetValueDanger}`}>
-              {totalTargetScore}
-              <span className={styles.totalTargetSlash}> / {totalMaxScore}</span>
-            </div>
-          </div>
-          <div className={styles.totalTargetSpacer} />
-          <div className={styles.totalTargetNote}>
-            来自 {subjects.length} 个科目 · 总分由各科目标自动相加
-          </div>
-        </div>
-
-        {/* 考试基本信息网格 */}
-        <div className={styles.settingsGridExam}>
-          <div>
-            <div className={styles.inputLabel}>考试名称</div>
-            <input
-              className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMargin}`}
-              value={exam.examName}
-              onChange={(e) => onUpdateExam({ examName: e.target.value })}
-            />
-          </div>
-          <div>
-            <div className={styles.inputLabel}>目标院校</div>
-            <input
-              className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMargin}`}
-              value={exam.school}
-              onChange={(e) => onUpdateExam({ school: e.target.value })}
-            />
-          </div>
-          <div>
-            <div className={styles.inputLabel}>学院 / 研究院</div>
-            <input
-              className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMargin}`}
-              value={exam.major?.split(" ")[0] || ""}
-              onChange={(e) => {
-                const parts = exam.major?.split(" ") || [];
-                parts[0] = e.target.value;
-                onUpdateExam({ major: parts.join(" ") });
-              }}
-              placeholder="如：重庆研究院"
-            />
-          </div>
-          <div>
-            <div className={styles.inputLabel}>报考方向 / 专业</div>
-            <input
-              className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMargin}`}
-              value={exam.major}
-              onChange={(e) => onUpdateExam({ major: e.target.value })}
-              placeholder="如：828 物理化学"
-            />
-          </div>
-          <div>
-            <div className={styles.inputLabel}>考试日期</div>
-            <input
-              className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMargin}`}
-              type="date"
-              value={exam.examDate}
-              onChange={(e) => onUpdateExam({ examDate: e.target.value })}
-            />
-          </div>
+  // ─── 二级页：考试设置（默认展示信息，点击「编辑」出现输入框） ───
+  const goalView = (
+    <>
+      <div className={styles.settingsDetailHeader}>
+        <div className={styles.settingsDetailTitle}>考试设置</div>
+        <div className={styles.subjectActions}>
+          <button className={styles.settingsCloseBtn} onClick={() => setPage(null)} aria-label="关闭">✕</button>
         </div>
       </div>
 
-      {/* ═══ 区块2：考试科目 ═══ */}
-      <div>
-        <div className={styles.subjectRowHead}>
-          <div>
-            <div className={styles.sectionLabel}>科目设置</div>
-            <h3 className={styles.settingsH3}>
-              考试科目（{subjects.length}）
-            </h3>
+      {/* 考试信息：展示态 / 编辑态 */}
+      {!examEditing ? (
+        <div className={styles.profileExamInfoList}>
+          <div className={styles.examInfoRow}>
+            <span className={styles.examInfoLabel}>考试</span>
+            <span className={styles.examInfoValue}>{exam.examName || "未命名考试"}</span>
           </div>
-          <button
-            className={`${styles.primaryBtn} ${styles.btnMedium}`}
-            onClick={() => setShowAddForm(!showAddForm)}
-          >
-            {showAddForm ? "取消" : "+ 添加科目"}
-          </button>
+          <div className={styles.examInfoRow}>
+            <span className={styles.examInfoLabel}>报考专业</span>
+            <span className={styles.examInfoValue}>{exam.school && exam.major ? `${exam.school} · ${exam.major}` : exam.school || exam.major || "未填写"}</span>
+          </div>
+          <div className={styles.examInfoRow}>
+            <span className={styles.examInfoLabel}>考试日期</span>
+            <span className={styles.examInfoValue}>{exam.examDate || "未设置"}</span>
+          </div>
+          <div className={styles.examInfoActions}>
+            <button
+              className={`${styles.secondaryBtn} ${styles.btnCompact}`}
+              onClick={() => setExamEditing(true)}
+            >
+              编辑
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className={styles.settingsSection}>
+          <div className={styles.sectionLabel}>我的考试</div>
+          <div className={styles.settingsGridExam}>
+            <div>
+              <div className={styles.inputLabel}>考试名称</div>
+              <input
+                className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMargin}`}
+                value={exam.examName}
+                onChange={(e) => onUpdateExam({ examName: e.target.value })}
+                placeholder="如：2027 考研初试"
+              />
+            </div>
+            <div>
+              <div className={styles.inputLabel}>目标院校</div>
+              <input
+                className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMargin}`}
+                value={exam.school}
+                onChange={(e) => onUpdateExam({ school: e.target.value })}
+                placeholder="如：哈尔滨工业大学"
+              />
+            </div>
+            <div>
+              <div className={styles.inputLabel}>报考专业</div>
+              <input
+                className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMargin}`}
+                value={exam.major}
+                onChange={(e) => onUpdateExam({ major: e.target.value })}
+                placeholder="如：数学二"
+              />
+            </div>
+            <div>
+              <div className={styles.inputLabel}>考试日期</div>
+              <input
+                className={`${styles.inputField} ${styles.subjectSelectFull} ${styles.settingsInputMargin}`}
+                type="date"
+                value={exam.examDate}
+                onChange={(e) => onUpdateExam({ examDate: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className={styles.examEditActions}>
+            <button
+              className={`${styles.primaryBtn} ${styles.btnSmall}`}
+              onClick={() => setExamEditing(false)}
+            >
+              保存
+            </button>
+            <button
+              className={`${styles.secondaryBtn} ${styles.btnSmall}`}
+              onClick={() => setExamEditing(false)}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 目标总分摘要 */}
+      <div className={styles.profileExamCard}>
+        <div className={styles.totalTargetLabel}>目标总分</div>
+        <div className={styles.totalTargetValuePlain}>
+          {totalTargetScore}<span className={styles.totalTargetUnit}>分</span>
+        </div>
+      </div>
+
+      {/* 考试科目列表 */}
+      <div>
+        <div className={styles.sectionLabel}>考试科目</div>
+        <div className={`${styles.subjectList} ${styles.subjectListMarginTop}`}>
+          {subjects.length === 0 ? (
+            <div className={styles.subjectEmpty}>
+              暂无考试科目，点击下方「+ 添加科目」
+            </div>
+          ) : (
+            subjects.map((subject) => (
+              <EditableSubjectRow key={subject.id} subject={subject} />
+            ))
+          )}
         </div>
 
-        {/* 新增科目表单 */}
-        {showAddForm && (
+        {/* 添加科目（弱化按钮，放列表底部） */}
+        {!showAddForm ? (
+          <button
+            className={`${styles.secondaryBtn} ${styles.btnMedium}`}
+            onClick={() => setShowAddForm(true)}
+          >
+            + 添加科目
+          </button>
+        ) : (
           <div className={styles.addFormBox}>
-            <div className={styles.addFormTitle}>
-              新增科目
-            </div>
+            <div className={styles.addFormTitle}>新增科目</div>
             {subjectNameError && (
               <div className={styles.addFormError}>⚠️ {subjectNameError}</div>
             )}
@@ -467,7 +443,7 @@ export function SettingsPanel({
                       }
                     }}
                   />
-                  <span className={styles.scoreSlash}>/ {newSubject.maxScore}</span>
+                  <span className={styles.scoreSlash}>/ {newSubject.maxScore} 分</span>
                 </div>
               </div>
             </div>
@@ -482,91 +458,264 @@ export function SettingsPanel({
           </div>
         )}
 
-        {/* 科目列表 */}
-        {subjects.length === 0 ? (
-          <div className={styles.subjectEmpty}>
-            暂无考试科目，点击“+ 添加科目”开始添加
-          </div>
-        ) : (
-          <div className={styles.subjectList}>
-            {subjects.map((subject) => (
-              <EditableSubjectRow key={subject.id} subject={subject} />
-            ))}
-          </div>
-        )}
-
-        {/* 底部汇总 */}
         <div className={styles.subjectSummary}>
-          总分 {totalTargetScore} / {totalMaxScore} · 共 {subjects.length} 个科目 ·
-          修改任一科目目标后总分自动更新
+          目标总分 {totalTargetScore} 分 · 共 {subjects.length} 个科目
         </div>
       </div>
+    </>
+  );
 
-      {/* ═══ 区块3：AI 助手配置（PRD 3.5）═══ */}
+  // ─── 二级页：AI 学习助手（精简开关） ───
+  const aiView = (
+    <>
+      <div className={styles.settingsDetailHeader}>
+        <div className={styles.settingsDetailTitle}>AI 学习助手</div>
+        <button className={styles.settingsCloseBtn} onClick={() => setPage(null)} aria-label="关闭">✕</button>
+      </div>
+
+      {/* 扁平化布局（2026-08-05 用户反馈：去掉模块套模块，延续极简风格） */}
       <div className={styles.settingsSection}>
-        <div className={styles.sectionLabel}>AI 助手配置</div>
-        <h3 className={styles.settingsH3}>
-          权限与行为（{appSettings.aiEnabled ? "已启用" : "已禁用"}）
-        </h3>
-
-        <div className={styles.aiConfigBox}>
-          {aiToggleRow("启用 AI 学习助手", "aiEnabled", "关闭后 AI 建议与自动操作不再生效")}
-          {aiToggleRow("AI 执行修改前需确认", "aiConfirmBeforeAction", "生成任务/更新图谱等操作前先征求用户同意")}
-          {aiToggleRow("AI 识别后需用户确认", "aiConfirmAfterRecognition", "资料/真题识别结果不直接写入，等待确认")}
-          {aiToggleRow("允许 AI 读取已上传资料", "aiReadUploads", "AI 可参考你上传的 PDF 与资料内容")}
-          {aiToggleRow("允许 AI 参考学习记录", "aiReadStudyRecords", "AI 可读取学习时长、做题与复习记录")}
-          {aiToggleRow("允许 AI 调整学习计划", "aiAdjustPlan", "AI 可根据掌握度自动重排每日任务")}
+        {/* API Key */}
+        <div className={styles.inputLabel}>DeepSeek API Key</div>
+        <input
+          className={`${styles.inputField} ${styles.settingsInputMarginSm}`}
+          type="password"
+          autoComplete="off"
+          placeholder="sk-…（在 https://platform.deepseek.com/api_keys 申请）"
+          value={apiKey}
+          onChange={(e) => { setApiKey(e.target.value); setKeyStatus(null); }}
+        />
+        <div className={styles.dataActions}>
+          <button className={`${styles.primaryBtn} ${styles.btnSmall}`} disabled={!apiKey.trim() || testingKey} onClick={handleTestApiKey}>
+            {testingKey ? "测试连接中…" : "保存并测试连接"}
+          </button>
+          {apiKey.trim() && (
+            <button
+              className={`${styles.secondaryBtn} ${styles.btnSmall}`}
+              onClick={() => { setApiKey(""); setStoredApiKey(""); setKeyStatus(null); }}
+            >
+              清除
+            </button>
+          )}
         </div>
+        {keyStatus && (
+          <p className={`text-[13px] mb-2 font-bold ${keyStatus.ok ? "text-[#18181B]" : "text-[#EF4444]"}`}>
+            {keyStatus.text}
+          </p>
+        )}
+      </div>
 
-        {/* 回答详细程度 */}
+      <div className={styles.settingsSection}>
+        {/* AI 回答详细程度 */}
         <div className={styles.aiDetailRow}>
-          <span className={styles.aiDetailLabel}>回答详细程度</span>
+          <span className={styles.aiDetailLabel}>AI 回答详细程度</span>
           <div className={styles.aiDetailButtons}>
-            {(["简洁", "标准", "详细"] as const).map((detail) => (
+            {(["简洁", "标准", "详细"] as const).map((level) => (
               <button
-                key={detail}
-                className={`${appSettings.aiAnswerDetail === detail ? styles.primaryBtn : styles.secondaryBtn} ${styles.btnSmaller}`}
-                onClick={() => onUpdateAppSettings({ aiAnswerDetail: detail })}
+                key={level}
+                onClick={() => onUpdateAppSettings({ aiAnswerDetail: level })}
+                className={`${styles.navTab} ${(appSettings.aiAnswerDetail || "标准") === level ? styles.navTabActive : styles.navTabInactive}`}
               >
-                {detail}
+                {level}
               </button>
             ))}
           </div>
         </div>
-
-        <div className={styles.aiEngineNote}>
-          当前引擎：{appSettings.aiProvider} · {appSettings.modelName} · 数据源：{appSettings.retrievalMode}
-        </div>
       </div>
 
-      {/* ═══ 区块4：数据管理（PRD 3.5 导入导出）═══ */}
-      <div>
-        <div className={styles.sectionLabel}>数据管理</div>
-        <h3 className={styles.settingsH3}>
-          JSON 备份与恢复
-        </h3>
+      <div className={styles.settingsSection}>
+        {/* AI 行为开关：扁平列表，不做嵌套卡片 */}
+        {aiToggleRow("自动安排学习", "aiEnabled")}
+        {aiToggleRow("修改前询问", "aiConfirmBeforeAction")}
+        {aiToggleRow("识别资料后确认", "aiConfirmAfterRecognition")}
+        {aiToggleRow("参考已上传资料", "aiReadUploads")}
+        {aiToggleRow("参考学习记录", "aiReadStudyRecords")}
+        {aiToggleRow("自动调整计划", "aiAdjustPlan")}
+      </div>
+    </>
+  );
 
-        <div className={styles.dataBox}>
-          <p className={styles.dataDesc}>
-            导出完整的考试目标、科目、资料、真题、卡片、任务与复习记录为 JSON 文件；
-            导入后覆盖当前数据（导入前请先导出备份）。
-          </p>
-          <div className={styles.dataActions}>
-            <button className={`${styles.primaryBtn} ${styles.btnMedium}`} onClick={onExportData}>
-              ⬇️ 导出数据 (JSON)
-            </button>
-            <button className={`${styles.secondaryBtn} ${styles.btnMedium}`} onClick={() => fileInputRef.current?.click()}>
-              ⬆️ 导入数据 (JSON)
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/json,.json"
-              className={styles.hiddenFileInput}
-              onChange={handleFileChange}
-            />
-          </div>
+  // ─── 二级页：数据管理 ───
+  const dataView = (
+    <>
+      <div className={styles.settingsDetailHeader}>
+        <div className={styles.settingsDetailTitle}>数据管理</div>
+        <button className={styles.settingsCloseBtn} onClick={() => setPage(null)} aria-label="关闭">✕</button>
+      </div>
+
+      <div className={styles.settingsSection}>
+        <p className={styles.dataMgmtHint}>
+          数据保存在本机浏览器（localStorage / IndexedDB），换设备或清理浏览器缓存会丢失。建议定期导出备份。
+        </p>
+        <div className={styles.dataActions}>
+          <button className={`${styles.primaryBtn} ${styles.btnMedium}`} onClick={onExportData}>
+            ⬇️ 导出学习档案
+          </button>
+          <button className={`${styles.secondaryBtn} ${styles.btnMedium}`} onClick={() => fileInputRef.current?.click()}>
+            ⬆️ 导入数据
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className={styles.hiddenFileInput}
+            onChange={handleFileChange}
+          />
         </div>
+      </div>
+    </>
+  );
+
+  // ─── 二级页：学习方法（内置学习系统说明，7 个区块） ───
+  const methodView = (
+    <>
+      <div className={styles.settingsDetailHeader}>
+        <div className={styles.settingsDetailTitle}>学习方法</div>
+        <button className={styles.settingsCloseBtn} onClick={() => setPage(null)} aria-label="关闭">✕</button>
+      </div>
+
+      <div className={styles.settingsSection}>
+        <p className={styles.methodIntro}>
+          这套系统不只是「打卡 + 记事本」，它内置了一套完整的学习方法。先看目标要什么，再层层展开、逐轮巩固，
+          每一步都有 AI 帮你盯着。下面从头讲清楚它是怎么帮你学的。
+        </p>
+      </div>
+
+      {/* 1. 逆向设计 */}
+      <div className={styles.methodSection}>
+        <div className={styles.methodTitle}>1 · 逆向设计：先看目标，再安排学习</div>
+        <p className={styles.methodBody}>
+          传统学习是「拿到教材从第一章开始」，这套系统反过来：先看考试要什么，再回头安排学习。
+          真题和大纲定方向——告诉你考什么、怎么考；教材帮助理解——把考点讲透；教辅拓展深化——补充练习与延伸。
+          所有材料按「谁服务谁」组织，优先学真题反复考、分值大的内容，而不是平均用力。
+        </p>
+      </div>
+
+      {/* 2. 7 核 */}
+      <div className={styles.methodSection}>
+        <div className={styles.methodTitle}>2 · 7 核：一周走一遍全局</div>
+        <p className={styles.methodBody}>
+          从真题中抽出统领全科的七个核心，一天攻克一个，一周走完一遍。
+          快速摸清整门课的骨架，避免「第一章学了三周、后面没时间」的失衡。
+          之后每一轮复习都可以用 7 核作为主线反复加固。
+        </p>
+      </div>
+
+      {/* 3. 4 层 */}
+      <div className={styles.methodSection}>
+        <div className={styles.methodTitle}>3 · 4 层：从「知道」到「会用」</div>
+        <p className={styles.methodBody}>
+          每个知识点按四层递进学习：理解（看懂是什么）→ 展开（弄清来龙去脉）→ 练习（会做基础题）→ 综合（能用于整卷答题）。
+          四周四层，一层一过关，不赶进度，每层都留足练习时间。
+        </p>
+      </div>
+
+      {/* 4. 6 轮 */}
+      <div className={styles.methodSection}>
+        <div className={styles.methodTitle}>4 · 6 轮：循环推进，一轮比一轮快</div>
+        <p className={styles.methodBody}>
+          整门课整体过 6 轮：打底 → 连线 → 补漏 → 提速 → 真题 → 冲刺，一月一轮是标准节奏。
+          每一轮都在上一轮基础上加快，前几轮慢而全，后几轮快而准。
+          时间紧也没关系：按剩余天数倒推轮次，压缩到能做几轮就做几轮，系统会重新排期。
+        </p>
+      </div>
+
+      {/* 5. 知识图谱 + 学习者模型 */}
+      <div className={styles.methodSection}>
+        <div className={styles.methodTitle}>5 · 知识图谱 + 学习者模型：学没学会，有数</div>
+        <p className={styles.methodBody}>
+          所有知识点被连成一张「谁依赖谁」的网：先修知识点没掌握，后续内容学了也容易塌。
+          每个知识点都有一张掌握度快照：当前掌握度、近期变化、遗忘风险、下次复习时间。
+          该复习哪个、哪些可以跳过，系统按你的真实状态算，不靠感觉。
+        </p>
+      </div>
+
+      {/* 6. 动态计划 + Agent 闭环 */}
+      <div className={styles.methodSection}>
+        <div className={styles.methodTitle}>6 · 动态计划 + Agent 闭环：AI 每天帮你推理</div>
+        <p className={styles.methodBody}>
+          计划不是排一次就死掉：AI 综合你的目标、知识图谱状态、剩余时间，推理今天到底该做什么，
+          每天都给出可执行的任务。学习前明确学什么，学习中随时记录，学习后 AI 分析效果并更新状态，
+          形成「计划 → 执行 → 反馈 → 调整」的闭环。
+        </p>
+      </div>
+
+      {/* 7. 适合哪些考试 */}
+      <div className={styles.methodSection}>
+        <div className={styles.methodTitle}>7 · 适合哪些考试</div>
+        <ul className={styles.methodList}>
+          <li><strong>最适合：</strong>成体系、需要背诵的科目（专业课、政治等）——图谱和掌握度模型作用最大。</li>
+          <li><strong>部分适合：</strong>英语等需要长期积累的科目——背单词、长难句可以用 7 核与多轮循环，但手感型内容需额外配合刷题。</li>
+          <li><strong>不适合：</strong>靠临场手感发挥的题型——系统不擅长替代「大量随机练习」建立的手感。</li>
+        </ul>
+      </div>
+    </>
+  );
+
+  // ══════════════════════════════════════
+  // 设置首页：入口列表
+  // ══════════════════════════════════════
+  if (page === null) {
+    return (
+      <div className={styles.workspacePane}>
+        <div className={styles.profileTitle}>设置</div>
+        <div className={styles.profileSubtitle}>选择你要调整的内容</div>
+
+        <div className={styles.settingsNavList}>
+          <button className={styles.settingsNavItem} onClick={() => setPage("goal")}>
+            <span className={styles.settingsNavIcon}>🎯</span>
+            <span className={styles.settingsNavBody}>
+              <span className={styles.settingsNavTitle}>我的目标</span>
+              <span className={styles.settingsNavDesc}>
+                考试、院校、科目分数 · 目标总分 {totalTargetScore} 分 · 考试日期 {exam.examDate ? "已设置" : "未设置"}
+              </span>
+            </span>
+            <span className={styles.settingsNavArrow}>›</span>
+          </button>
+
+          <button className={styles.settingsNavItem} onClick={() => setPage("ai")}>
+            <span className={styles.settingsNavIcon}>🤖</span>
+            <span className={styles.settingsNavBody}>
+              <span className={styles.settingsNavTitle}>AI 学习助手</span>
+              <span className={styles.settingsNavDesc}>
+                AI 参与学习规划 · 当前{appSettings.aiEnabled ? "已开启" : "已关闭"}
+              </span>
+            </span>
+            <span className={styles.settingsNavArrow}>›</span>
+          </button>
+
+          <button className={styles.settingsNavItem} onClick={() => setPage("data")}>
+            <span className={styles.settingsNavIcon}>📦</span>
+            <span className={styles.settingsNavBody}>
+              <span className={styles.settingsNavTitle}>数据管理</span>
+              <span className={styles.settingsNavDesc}>导出 / 导入学习档案</span>
+            </span>
+            <span className={styles.settingsNavArrow}>›</span>
+          </button>
+
+          <button className={styles.settingsNavItem} onClick={() => setPage("method")}>
+            <span className={styles.settingsNavIcon}>🧭</span>
+            <span className={styles.settingsNavBody}>
+              <span className={styles.settingsNavTitle}>学习方法</span>
+              <span className={styles.settingsNavDesc}>7核 · 4层 · 6轮 · 这套系统怎么帮你学</span>
+            </span>
+            <span className={styles.settingsNavArrow}>›</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════
+  // 弹窗渲染
+  // ══════════════════════════════════════
+  return (
+    <div className={styles.modalBackdrop} onClick={() => setPage(null)}>
+      <div className={styles.settingsModalPanel} onClick={(e) => e.stopPropagation()}>
+        {page === "goal" && goalView}
+        {page === "ai" && aiView}
+        {page === "data" && dataView}
+        {page === "method" && methodView}
       </div>
     </div>
   );

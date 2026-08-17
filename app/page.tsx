@@ -1,51 +1,50 @@
 "use client";
 
-import { useState, useRef, useEffect, type FormEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent } from "react";
 import type {
   MasteryText, StudyMood, WorkspaceView, KnowledgePanel,
   DashboardPanel, ReviewScope, ActiveDialog, DeletedBackup,
-  Resource, Question, KnowledgeNode, Task,
   PendingItem, Review, PlanLog, StudyDay,
-  GrowthCard, Annotation, AgentStep, StudyDraft, AgentMessage, ChatSession, CardCategory,
-  StructuredReview, Material, MaterialSection
+  AgentStep, StudyDraft, ChatSession, CardCategory,
+  StructuredReview, Material, MaterialSection,
+  ExamGoal, Subject, Resource, Question, KnowledgeNode, Task, Note, GrowthCard, Annotation,
 } from "./lib/types";
 import { resourceToMaterial, resourceToMaterialSections } from "./lib/types";
 import {
-  seedExam, seedSubjects, seedResources, seedQuestions, seedNodes,
-  seedTasks, seedNotes, seedCards, seedAnnotations, seedAppSettings,
-  seedStudyDays, seedCardCategories, seedMaterials, seedMaterialSections
+  seedAppSettings, seedQuestions, seedResources,
+  CORE_NAMES, QUICK_PROMPTS, MASTERY_OPTIONS, MOOD_OPTIONS,
 } from "./lib/default-data";
-import { TASK, TOAST_DURATION, MAX_STUDY_DAYS } from "./lib/rules";
-import { savePdfFile, deletePdfFile } from "./lib/pdf-storage";
-import { hydrateWorkspace, saveWorkspace } from "./lib/storage";
-import { loadLearningEvents, appendLearningEvent, type LearningEvent } from "./lib/events";
+import { TOAST_DURATION } from "./lib/rules";
+import { hydrateWorkspace, saveWorkspace, buildWorkspaceSnapshot } from "./lib/storage";
+import { loadLearningEvents, type LearningEvent } from "./lib/events";
 import { computeReplayComparison, computeProgressComparison } from "./lib/replay-console";
 import { projectKnowledgeState } from "./lib/projection";
-import { buildReviewSubjects, reviewMinutesOf, reviewCompletedCount, reviewNewNodesCount, reviewDoneQuestionsCount, reviewReviewedCardsCount, reviewMasteryAverage, buildReviewAiSummary, buildStructuredReview } from "./lib/reviews";
-import { createChatSession, createMessage, appendMessage, migrateLegacyChat, classifyPromptIntent } from "./lib/chat";
+import { computeLegacyProgress } from "./lib/reducer";
+import { buildReviewSubjects, reviewMinutesOf, reviewCompletedCount, reviewMasteryAverage, buildReviewAiSummary, buildStructuredReview } from "./lib/reviews";
+import { migrateLegacyChat } from "./lib/chat";
 import styles from "../styles/workspace.module.css";
 import { Sidebar } from "./components/Sidebar";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { ReviewDialog } from "./components/ReviewDialog";
-import { OnboardingWizard, type OnboardingResult } from "./components/OnboardingWizard";
+import { OnboardingWizard } from "./components/OnboardingWizard";
 import { WorkspaceProvider, type WorkspaceCtx } from "./components/workspace-context";
 import { CardsView } from "./components/CardsView";
 import { KnowledgeView } from "./components/KnowledgeView";
 import { DashboardTasksView } from "./components/DashboardTasksView";
+import { GlobalResourceUploadModal } from "./components/GlobalResourceUploadModal";
 import { AgentView } from "./components/AgentView";
 import { SettingsView } from "./components/SettingsView";
 import { TaskCompletionModal } from "./components/TaskCompletionModal";
-import { analyzeExam, analyzeErrorReason } from "./lib/ai/analyze-exam";
-import { analyzeMistakes, mistakesErrorReason } from "./lib/ai/analyze-mistakes";
-import { generatePlan as generateTodayPlan, planErrorReason } from "./lib/ai/plan-generate";
-import { buildMaterialBundle, buildPlaceholderQuestionsForPastPaper, extractQuestionKeyword } from "./lib/materials";
 import { buildHeatmapDays, formatHeatmapStart, monBasedOffsetOf, buildHeatmapGrid, buildHeatmapDayLabels, countCardsByDate } from "./lib/heatmap";
-import { makeId, today, dateOnly, normalizeExamGoal } from "./lib/utils";
+import { today, dateOnly, normalizeExamGoal } from "./lib/utils";
+import { useWorkspaceHandlers } from "./use-workspace-handlers";
 
-const quickPrompts = ["今天学什么", "找近五年化学势真题", "傅献彩哪里讲这个", "为什么总错这类题", "把今天整理成笔记", "分析最近三套真题，更新图谱并重排计划", "我现在属于第几轮"];
-const masteryOptions: MasteryText[] = ["完全不懂", "有些模糊", "基本理解", "能够讲清", "能够迁移"];
-const moodOptions: StudyMood[] = ["较差", "一般", "正常", "较好", "很好"];
-const coreNames = ["热力学", "相平衡", "化学动力学", "电化学", "统计热力学", "表面与胶体", "实验与综合"];
+const quickPrompts = QUICK_PROMPTS;
+const masteryOptions: MasteryText[] = [...MASTERY_OPTIONS];
+// 2026-08-05 产品需求：七核根据真题动态生成
+const moodOptions: StudyMood[] = [...MOOD_OPTIONS];
+// 2026-08-05 产品需求：七核根据历年真题动态生成，不再是写死内容。
+const fallbackCoreNames = CORE_NAMES;
 
 export default function Home() {
   const [activeView, setActiveView] = useState<WorkspaceView>("dashboard");
@@ -64,32 +63,32 @@ export default function Home() {
   const [appReady, setAppReady] = useState(false);
   // ─── Dashboard: Hydration-safe date (SSR: fixed; mount: real) ───
   // 必须在派生值（dueCards 等）之前声明，否则 TDZ ReferenceError
-  const [hydratedTodayStr, setHydratedTodayStr] = useState("2026-07-30");
-  const [hydratedDaysLeft, setHydratedDaysLeft] = useState(143);
-  const [exam, setExam] = useState(seedExam);
+  const [hydratedTodayStr, setHydratedTodayStr] = useState("");
+  const [hydratedDaysLeft, setHydratedDaysLeft] = useState(0);
+  // 2026-08-03 用户反馈：移除虚拟数据，新用户初始状态为空白
+  const [exam, setExam] = useState<ExamGoal>(() => ({
+    examName: "", school: "", major: "", examDate: "", startDate: "",
+    weeklyDays: "", weekdayHours: "", weekendHours: "", baseline: "",
+  }));
   const [appSettings, setAppSettings] = useState(seedAppSettings);
-  const [subjects, setSubjects] = useState(seedSubjects);
-  const [activeKnowledgeSubject, setActiveKnowledgeSubject] = useState(seedSubjects[0]?.name ?? "");
-  const [activeCardSubject, setActiveCardSubject] = useState(seedSubjects[0]?.name ?? "");
-  const [resources, setResources] = useState(seedResources);
-  const [materials, setMaterials] = useState<Material[]>(seedMaterials);
-  const [materialSections, setMaterialSections] = useState<MaterialSection[]>(seedMaterialSections);
-  const [questions, setQuestions] = useState(seedQuestions);
-  const [nodes, setNodes] = useState(seedNodes);
-  const [tasks, setTasks] = useState(seedTasks);
-  const [pending, setPending] = useState<PendingItem[]>([
-    { id: "p-1", kind: "真题识别", title: "2023 828 真题第 6 题", subject: "828 物理化学", detail: "建议挂载到 相平衡 / 相律 / 自由度判断", status: "待确认" },
-  ]);
-  const [notes, setNotes] = useState(seedNotes);
-  const [cards, setCards] = useState(seedCards);
-  // ─── UX Sprint: 卡片自定义分类（学科 ≠ 分类；按 subjectId 隔离）───
-  const [categories, setCategories] = useState<CardCategory[]>(seedCardCategories);
-  // 当前打开的卡片组 id（null = 成长卡片首页；真实分类 / ALL_GROUPS / UNCATEGORIZED = 卡片组学习空间）
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [activeKnowledgeSubject, setActiveKnowledgeSubject] = useState("");
+  const [activeCardSubject, setActiveCardSubject] = useState("");
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [materialSections, setMaterialSections] = useState<MaterialSection[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [nodes, setNodes] = useState<KnowledgeNode[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [pending, setPending] = useState<PendingItem[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [cards, setCards] = useState<GrowthCard[]>([]);
+  const [categories, setCategories] = useState<CardCategory[]>([]);
   const [activeCardCategory, setActiveCardCategory] = useState<string | null>(null);
-  const [annotations, setAnnotations] = useState(seedAnnotations);
-  const [activeResourceId, setActiveResourceId] = useState(seedResources[0]?.id ?? "");
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [activeResourceId, setActiveResourceId] = useState("");
   const [readerSearch, setReaderSearch] = useState("");
-  const [readerPage, setReaderPage] = useState(seedResources[0]?.currentPage ?? "");
+  const [readerPage, setReaderPage] = useState("");
   const [readerZoom, setReaderZoom] = useState("100%");
   const [resourceView, setResourceView] = useState<"grid" | "list">("grid");
   /** 资料库两态（2026-08-01）：false=书架页（管理与选择）；true=阅读页（Reader + 批注 + AI 学习） */
@@ -101,7 +100,7 @@ export default function Home() {
     step: string;
   } | null>(null);
   const [questionFilter, setQuestionFilter] = useState({ subject: "全部", core: "全部", result: "全部", keyword: "" });
-  const [studyDays, setStudyDays] = useState<StudyDay[]>(seedStudyDays);
+  const [studyDays, setStudyDays] = useState<StudyDay[]>([]);
   const [learningEvents, setLearningEvents] = useState<LearningEvent[]>([]);
   const [focusMode, setFocusMode] = useState(false);
   const [cardMode, setCardMode] = useState("背诵");
@@ -111,10 +110,10 @@ export default function Home() {
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   // 正在编辑的卡片（仅编辑弹窗使用；避免卡片列表变化时闪动）
   const editingCard = editingCardId ? cards.find((c) => c.id === editingCardId) ?? null : null;
-  const [cardDialogSubject, setCardDialogSubject] = useState(seedSubjects[0]?.name ?? "");
+  const [cardDialogSubject, setCardDialogSubject] = useState("");
   const [cardDialogCategory, setCardDialogCategory] = useState("");
-  // ─── 卡片中心：卡片组作为一级工作空间（成长卡片 → 卡片组 → 卡片）───
-  // null = 成长卡片首页（仅管理/展示卡片组）；有值 = 卡片组学习空间
+  // ─── 卡片中心：卡片组作为一级工作空间（沉淀卡片 → 卡片组 → 卡片）───
+  // null = 沉淀卡片首页（仅管理/展示卡片组）；有值 = 卡片组学习空间
   const [cardSubjectView, setCardSubjectView] = useState<string | null>(null);
   // ─── 信息架构（2026-08-01 用户反馈）：拆分为【状态筛选】×【分组方式】两个独立维度 ───
   // 状态（回答「看哪些」）：待复习 / 全部 / 收藏
@@ -150,7 +149,7 @@ export default function Home() {
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>([]);
   const [examAnalyzing, setExamAnalyzing] = useState(false); // 真题 AI 分析进行中
   const [logs, setLogs] = useState<PlanLog[]>([
-    { id: "l-1", time: today(), input: "今天只有两个小时", output: "压缩为 2 个 828 Layer 2 任务", accepted: "已接受", dataRead: ["考试日期", "当前轮次", "高风险节点"], userRevision: "无", finalResult: "生成今日任务", rating: "未评价", rework: "0" },
+    { id: "l-1", time: today(), input: "今天只有两个小时", output: "压缩为 2 个 第 2 层任务", accepted: "已接受", dataRead: ["考试日期", "当前轮次", "高风险节点"], userRevision: "无", finalResult: "生成今日任务", rating: "未评价", rework: "0" },
   ]);
   const [review, setReview] = useState<Review>({ done: "", hard: "", load: "刚好", tomorrow: "3 小时", priority: "" });
   // ─── P4 Phase 1: 复盘历史记录（结构化解析结果；提交复盘时追加）───
@@ -195,9 +194,6 @@ export default function Home() {
   const reviewSubjects = buildReviewSubjects(subjects.map((s) => s.name));
   const reviewMinutes = reviewMinutesOf(tasks);
   const reviewCompletedTasks = reviewCompletedCount(tasks);
-  const reviewNewNodes = reviewNewNodesCount(nodes);
-  const reviewDoneQuestions = reviewDoneQuestionsCount(questions);
-  const reviewReviewedCards = reviewReviewedCardsCount(cards);
   const reviewMasteryDelta = reviewMasteryAverage(nodes);
   const reviewAiSummary = buildReviewAiSummary(tasks, nodes);
   const subjectCards = cards.filter((card) => card.subject === activeCardSubject);
@@ -245,6 +241,9 @@ export default function Home() {
   const categoryClampedCardIndex = Math.min(Math.max(cardIndex, 0), Math.max(categoryReviewQueue.length - 1, 0));
   const activeGroupCard = categoryReviewQueue[categoryClampedCardIndex] ?? null;
   const subjectResources = resources.filter((resource) => resource.subject === activeKnowledgeSubject);
+  // 2026-08-05 产品需求：七核根据历年真题动态生成（非写死）
+  const coreNames = Array.from(new Set(questions.filter((q) => q.subject === activeKnowledgeSubject && q.core).map((q) => q.core)));
+  const effectiveCoreNames = coreNames.length > 0 ? coreNames : fallbackCoreNames;
   // UX Sprint（学科隔离）: activeResource 只在当前学科资源内查找，禁止跨学科回退到其他科目
   const activeResource = subjectResources.find((resource) => resource.id === activeResourceId) ?? subjectResources[0] ?? null;
   const subjectQuestions = questions.filter((question) => question.subject === activeKnowledgeSubject);
@@ -340,114 +339,23 @@ export default function Home() {
     });
   }, [learningEvents, nodes, subjects, questions, resources]);
 
-  // ─── Storage Contract 1C-1: 唯一 hydrate 入口（v5 优先；v3/v4 自动迁移，可回滚）───
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    const data = hydrateWorkspace();
-    setBootChecked(true);
-    if (!data) {
-      requestAnimationFrame(() => requestAnimationFrame(() => setAppReady(true)));
-      return; // 无任何存档 → 新用户，onboardingCompleted 保持 false → 显示初始化向导
-    }
-    try {
-      // 老用户（已有存档但无该字段）默认视为已完成，不再弹向导
-      setOnboardingCompleted((data.onboardingCompleted as boolean | undefined) ?? true);
-      if (data.exam) setExam(normalizeExamGoal(data.exam));
-      if (data.appSettings) setAppSettings(data.appSettings);
-      if (data.subjects) setSubjects(data.subjects);
-      if (data.activeKnowledgeSubject) setActiveKnowledgeSubject(data.activeKnowledgeSubject);
-      if (data.activeCardSubject) setActiveCardSubject(data.activeCardSubject);
-      if (data.resources) setResources(data.resources);
-      if (data.materials && Array.isArray(data.materials)) {
-        setMaterials(data.materials);
-      } else if (data.resources && Array.isArray(data.resources)) {
-        setMaterials((data.resources as Resource[]).map((resource) => resourceToMaterial(
-          resource,
-          (data.subjects as typeof subjects | undefined)?.find((subject) => subject.name === resource.subject)?.id ?? resource.subject,
-        )));
-      }
-      if (data.materialSections && Array.isArray(data.materialSections)) {
-        setMaterialSections(data.materialSections);
-      } else if (data.resources && Array.isArray(data.resources)) {
-        setMaterialSections((data.resources as Resource[]).flatMap((resource) => resourceToMaterialSections(resource, (data.questions as Question[] | undefined) ?? [])));
-      }
-      if (data.questions) setQuestions(data.questions);
-      if (data.nodes) setNodes(data.nodes);
-      if (data.tasks) setTasks(data.tasks);
-      if (data.pending) setPending(data.pending);
-      if (data.notes) setNotes(data.notes);
-      if (data.cards) setCards(data.cards);
-      // UX Sprint: 恢复自定义分类（按 subjectId 隔离，不跨学科）
-      if (data.cardCategories && Array.isArray(data.cardCategories)) setCategories(data.cardCategories);
-      if (data.annotations) setAnnotations(data.annotations);
-      if (data.activeResourceId) setActiveResourceId(data.activeResourceId);
-      if (data.readerSearch) setReaderSearch(data.readerSearch);
-      if (data.readerPage) setReaderPage(data.readerPage);
-      if (data.readerZoom) setReaderZoom(data.readerZoom);
-      if (data.studyDays) setStudyDays(data.studyDays);
-      if (data.agentSteps) setAgentSteps(data.agentSteps);
-      if (data.logs) setLogs(data.logs);
-      // UX Sprint P0: 兼容历史数据（旧 chat 数组）→ 迁移为单一 ChatSession（不丢失历史）
-      if (data.chatSessions && Array.isArray(data.chatSessions) && data.chatSessions.length > 0) {
-        const restoredSessionId = data.activeSessionId || data.chatSessions[0].id;
-        setChatSessions(data.chatSessions);
-        setActiveSessionId(restoredSessionId);
-        activeSessionIdRef.current = restoredSessionId;
-      } else if (data.chat) {
-        const legacySession = migrateLegacyChat(data.chat);
-        if (legacySession) {
-          setChatSessions([legacySession]);
-          setActiveSessionId(legacySession.id);
-          activeSessionIdRef.current = legacySession.id;
-        }
-      }
-      // Stabilization 1B-1: 恢复已保存的复盘（刷新后再打开 ReviewDialog 可见）
-      if (data.review) setReview(data.review);
-      // P4 Phase 1: 恢复复盘历史记录（提交后刷新仍可见）
-      if (data.structuredReviews && Array.isArray(data.structuredReviews)) setStructuredReviews(data.structuredReviews);
-      // UX Sprint: 恢复学习结束草稿（关闭/刷新/切换页面均不丢失，保存并完成后才清空）
-      if (data.studyDraft && data.studyDraft.taskId) setStudyDraft(data.studyDraft);
-      // 恢复正在进行的计时（#7）：运行中的段落按持久化的墙钟起点无缝续计
-      if (data.timer && data.timer.activeTimerTaskId) {
-        setActiveTimerTaskId(data.timer.activeTimerTaskId);
-        setTimerStartTime(data.timer.timerStartTime || "");
-        const accum = Number(data.timer.timerAccumSeconds || 0);
-        const startEpoch = Number(data.timer.timerRunStartEpoch || 0);
-        if (startEpoch > 0) {
-          runTimerFrom(accum, startEpoch);
-        } else {
-          setTimerAccumSeconds(accum);
-          setElapsedSeconds(accum);
-        }
-      }
-    } catch (err) {
-      // hydrateWorkspace 已在内部备份损坏原始串；此处仅记录，不清除任何 key
-      console.error("[Storage] hydrate 失败", err);
-    } finally {
-      requestAnimationFrame(() => requestAnimationFrame(() => setAppReady(true)));
-    }
-    // 仅在挂载时从 localStorage 恢复一次；runTimerFrom 为稳定语义，无需列入依赖
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
   // ─── Storage Contract 1C-1: 唯一 save 入口（防抖持久化，避免每次按键都全量序列化写盘 #3）───
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const latestSnapshotRef = useRef<string>("");
   useEffect(() => {
     if (!appReady) return;
-    latestSnapshotRef.current = JSON.stringify({
+    latestSnapshotRef.current = JSON.stringify(buildWorkspaceSnapshot({
       exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
       resources, materials, materialSections, questions, nodes, tasks, pending, notes, cards, annotations,
       activeResourceId, readerSearch, readerPage, readerZoom,
-      studyDays, agentSteps, logs, chatSessions, activeSessionId, review, structuredReviews, studyDraft, cardCategories: categories,
-      onboardingCompleted,
+      studyDays, agentSteps, logs, chatSessions, activeSessionId, review, structuredReviews, studyDraft,
+      categories, onboardingCompleted,
       timer: { activeTimerTaskId, timerStartTime, timerAccumSeconds, timerRunStartEpoch },
-    });
+    }));
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       // saveWorkspace 失败 → 不覆盖已有数据（符合 Failure Policy：写失败保留内存 State，提示用户）
-      const ok = saveWorkspace(JSON.parse(latestSnapshotRef.current) as Record<string, unknown>);
+      const ok = saveWorkspace(JSON.parse(latestSnapshotRef.current) as ReturnType<typeof buildWorkspaceSnapshot>);
       if (!ok) console.warn("[Storage] 写入失败（可能配额已满），数据保留在内存中");
     }, 400);
   }, [exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
@@ -461,7 +369,7 @@ export default function Home() {
   useEffect(() => {
     function flush() {
       if (!latestSnapshotRef.current) return;
-      saveWorkspace(JSON.parse(latestSnapshotRef.current) as Record<string, unknown>);
+      saveWorkspace(JSON.parse(latestSnapshotRef.current) as ReturnType<typeof buildWorkspaceSnapshot>);
     }
     window.addEventListener("beforeunload", flush);
     document.addEventListener("visibilitychange", flush);
@@ -529,1135 +437,151 @@ export default function Home() {
     (sum, subject) => sum + Number(subject.targetScore || 0),
     0
   );
-  const overallProgress = nodes.length > 0
-    ? Math.round(
-        (nodes.reduce((sum, node) => sum + node.masteryScore, 0) / Math.max(nodes.length, 1)) * 0.55 +
-        (confirmedQuestions / Math.max(questions.length, 1)) * 100 * 0.25 +
-        (resources.filter((r) => r.status === "已索引").length / Math.max(resources.length, 1)) * 100 * 0.2
-      )
-    : 0;
+  const overallProgress = computeLegacyProgress(
+    nodes.map((node) => node.masteryScore),
+    confirmedQuestions,
+    questions.length,
+    resources.filter((r) => r.status === "已索引").length,
+    resources.length
+  );
 
-  // ─── UX Sprint P0: ChatSession 管理（新建对话创建新 Session，不删除历史）───
-  function ensureChatSession() {
-    // 只信任 ref（函数式 setState 的 prev 会包含尚未提交的新 Session）。
-    // 不可用旧闭包 chatSessions.some() 判断——React 批处理中它会误判并创建第二个 Session。
-    let sessionId = activeSessionIdRef.current;
-    if (!sessionId) {
-      sessionId = makeId("s");
-      setChatSessions((prev) => [createChatSession(sessionId), ...prev]);
-      setActiveSessionId(sessionId);
-      activeSessionIdRef.current = sessionId;
-    }
-    return sessionId;
-  }
+  // ─── 业务 handlers 抽到 use-workspace-handlers.ts（行为等价，经 deps 注入 state/派生值）───
+  const {
+    newChatSession, pushAssistant, restoreLastDeleted, handleExportData, handleImportData, completeOnboarding, selectKnowledgeSubject, inferResource, openResource, openResourceDialog, closeResourceDialog, startUploadProgress, startBatchUpload, addResource, confirmPendingItem, dismissPendingItem, deleteResource, onCreateAnnotation, onEditAnnotation, onDeleteAnnotation, deleteQuestion, deleteNode, addCategoryInline, moveCardToCategory, reviewCard, moveCard, openNewCardDialog, openEditCardDialog, createCardFromText, deleteCard, openCardSource, showRelatedQuestions, updateTask, toggleTaskDone, moveTask, runTimerFrom, startTask, pauseTimer, resumeTimer, handleEndLearning, openTaskDialog, markTaskDraftDirty, requestCloseTaskDialog, completeTask, generatePlan, analyzeMaterial, runPrompt,
+  } = useWorkspaceHandlers({
+    ALL_GROUPS, UNCATEGORIZED, activeCardCategory, setActiveCardCategory, activeCardSubject, setActiveCardSubject, activeGroupCard, activeKnowledgePanel, setActiveKnowledgePanel, activeKnowledgeSubject, setActiveKnowledgeSubject, activeResource, activeSessionIdRef, activeTaskId, setActiveTaskId, activeView, setActiveView, cardFlipped, setCardFlipped, cardSubView, setCardSubView, cardSubjectView, setCardSubjectView, cards, setCards, categories, setCategories, categoryReviewQueue, chatInput, setChatInput, completionModalAllowEditTime, setCompletionModalAllowEditTime, completionModalCustomMinutes, setCompletionModalCustomMinutes, currentSubject, elapsedSeconds, setElapsedSeconds, exam, setExam, examAnalyzing, setExamAnalyzing, lastDeleted, setLastDeleted, materialAnalysisRunRef, materialAnalysisTimeoutsRef, materialSections, setMaterialSections, newCardDeckName, setNewCardDeckName, nodes, setNodes, questions, setQuestions, resources, setResources, resourcesRef, setActiveDialog, setActiveResourceId, setActiveSessionId, setActiveTimerTaskId, setAgentSteps, setAnnotations, setCardDialogCategory, setCardDialogSubject, setCardIndex, setChatHistoryOpen, setChatSessions, setCloseConfirmPending, setCompletionModalCustomEndTime, setEditingCardId, setFileUploadState, setLearningEvents, setLogs, setMaterials, setNewCardDeckOpen, setNotes, setNotice, setOnboardingCompleted, setPending, setQuestionFilter, setReaderPage, setStructuredReviews, setStudyDays, setStudyDraft, setSubjects, setTasks, setTimerAccumSeconds, setTimerRunStartEpoch, setTimerStartTime, studyDraft, subjectCategories, subjects, tasks, timerAccumSeconds, timerIntervalRef, timerRunStartEpoch, uploadProgressRunRef, uploadProgressTimeoutsRef, appSettings, materials, pending, notes, annotations, studyDays, agentSteps, logs, chatSessions, activeSessionId, review, structuredReviews,
+  
+  });
 
-  function newChatSession() {
-    const sessionId = makeId("s");
-    setChatSessions((prev) => [createChatSession(sessionId), ...prev]);
-    setActiveSessionId(sessionId);
-    activeSessionIdRef.current = sessionId;
-    setChatHistoryOpen(false);
-    setNotice("已创建新对话（历史对话保留在左侧）");
-  }
-
-  // UX Sprint: 推送 AI/系统消息（记录真实 createdAt；messageType 区分 AI 建议/系统操作/数据记录）
-  // 系统通知默认进入当前 Session 的「系统记录」折叠区，不与 AI 对话混排
-  function pushAssistant(text: string, messageType: NonNullable<AgentMessage["messageType"]> = "chat") {
-    const sessionId = ensureChatSession();
-    setChatSessions((items) => appendMessage(items, sessionId, createMessage("assistant", text, messageType)));
-    setNotice(text);
-  }
-  function pushSystem(text: string, messageType: "action" | "record" = "action") {
-    const sessionId = ensureChatSession();
-    setChatSessions((items) => appendMessage(items, sessionId, createMessage("system", text, messageType)));
-    setNotice(text);
-  }
-
-  // 撤销最近一次删除（此前 setLastDeleted 记录了备份，但没有入口消费它）
-  function restoreLastDeleted() {
-    if (!lastDeleted) return;
-    const backup = lastDeleted;
-    switch (backup.collection) {
-      case "resources": setResources((items) => [backup.item, ...items]); break;
-      case "questions": setQuestions((items) => [backup.item, ...items]); break;
-      case "nodes": setNodes((items) => [backup.item, ...items]); break;
-      case "cards": setCards((items) => [backup.item, ...items]); break;
-      case "subjects": setSubjects((items) => [...items, backup.item]); break;
-    }
-    setLastDeleted(null);
-    setNotice(`已恢复：${backup.label}`);
-  }
-
-  // ─── 数据导出（PRD 3.5 JSON 备份）───
-  function handleExportData() {
-    try {
-      const snapshot = {
-        exportedAt: new Date().toISOString(),
-        appName: "筑巢考研工作台",
-        storageVersion: 6,
-        exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
-        resources, materials, materialSections, questions, nodes, tasks, pending, notes, cards,
-        annotations, studyDays, agentSteps, logs, chatSessions, activeSessionId, review, structuredReviews,
-        cardCategories: categories,
-      };
-      const json = JSON.stringify(snapshot, null, 2);
-      const blob = new Blob([json], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `kaoyan-workspace-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      setNotice("已导出完整数据备份 (JSON)");
-    } catch (error) {
-      console.error("[Export] 导出失败", error);
-      setNotice("导出失败，请重试");
-    }
-  }
-
-  // ─── 数据导入（PRD 3.5 JSON 恢复）：写入 localStorage 后刷新，由 mount hydrate 统一恢复 ───
-  async function handleImportData(file: File) {
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text) as Record<string, unknown>;
-      if (!data || typeof data !== "object" || !Array.isArray(data.subjects)) {
-        setNotice("导入失败：不是有效的备份文件（缺少 subjects 字段）");
-        return;
-      }
-      const written = saveWorkspace({
-        ...(data as Record<string, unknown>),
-        storageVersion: 6,
-        onboardingCompleted: data.onboardingCompleted ?? true,
-      } as never);
-      if (!written) {
-        setNotice("导入失败：无法写入本地存储（可能磁盘版本更高或配额已满）");
-        return;
-      }
-      setNotice("导入成功，正在刷新恢复数据…");
-      setTimeout(() => window.location.reload(), 600);
-    } catch (error) {
-      console.error("[Import] 导入失败", error);
-      setNotice("导入失败：文件不是有效的 JSON 备份");
-    }
-  }
-
-  // ─── Onboarding：完成向导 → 用用户数据整体替换演示种子（清空 828 残留内容）───
-  function completeOnboarding(result: OnboardingResult) {
-    setExam(normalizeExamGoal(result.exam));
-    setSubjects(result.subjects);
-    setResources(result.resources);
-    setNodes(result.nodes);
-    setTasks(result.tasks);
-    // 其余学习内容清空，避免残留示例项目数据
-    setQuestions([]);
-    setCards([]);
-    setAnnotations([]);
-    setPending([]);
-    setNotes([]);
-    setStudyDays([]);
-    setCategories([]);
-    setStructuredReviews([]);
-    // 激活科目指向新项目的首个科目
-    const first = result.subjects[0]?.name ?? "";
-    setActiveKnowledgeSubject(first);
-    setActiveCardSubject(first);
-    setActiveView("dashboard");
-    setOnboardingCompleted(true);
-    setNotice("已创建考研项目，开始你的学习吧。");
-  }
-
-  // ─── Onboarding：试用示例数据 → 保留现有种子，直接进入工作台 ───
-  function loadDemoProject() {
-    setOnboardingCompleted(true);
-    setNotice("已载入示例数据（哈工大 / 828 物理化学）。");
-  }
-
-  // ─── Knowledge Center handlers ───
-  function selectKnowledgeSubject(subjectName: string) {
-    setActiveKnowledgeSubject(subjectName);
-    setQuestionFilter((prev) => ({ ...prev, subject: "全部" }));
-  }
-
-  function inferResource(rawName: string, subjectHint: string) {
-    const text = rawName.toLowerCase();
-    const matchedSubject = subjects.find((subject) => rawName.includes(subject.name) || rawName.includes(subject.name.replace(/\s/g, "")));
-    const subject = subjectHint || matchedSubject?.name || (rawName.includes("数学") ? "数学二" : rawName.includes("英语") ? "英语一" : rawName.includes("828") || rawName.includes("物理化学") || rawName.includes("傅献彩") ? "828 物理化学" : activeKnowledgeSubject || subjects[0]?.name || "未分科");
-    const isPastPaper = rawName.includes("真题") || /20\d{2}/.test(rawName);
-    const hasSolution = rawName.includes("解析") || rawName.includes("答案") || text.includes("solution");
-    const isFu = rawName.includes("傅献彩") || text.includes("physical");
-    const type = isPastPaper ? hasSolution ? "真题解析" : "真题" : isFu ? "教材" : rawName.includes("讲义") ? "课程讲义" : "学习资料";
-    const name = isFu ? "傅献彩《物理化学》" : rawName.replace(/\.(pdf|docx?|png|jpe?g)$/i, "");
-    const pages = isPastPaper ? "AI识别：按年份和题号拆分" : isFu ? "AI识别：共16章" : "AI识别：待确认章节";
-    const linkedNode = subject.includes("828") ? "热力学 / 相平衡 / 化学动力学 / 电化学 / 统计热力学 / 表面与胶体 / 实验与综合" : "待AI关联知识图谱";
-    const recommendedLayer = isPastPaper ? "第 2-4 层" : "第 1-2 层";
-    return { subject, type, name, pages, linkedNode, recommendedLayer, duplicate: resources.some((resource) => resource.fileName === rawName || resource.name === name) };
-  }
-
-  function openResource(resource: Resource) {
-    setActiveResourceId(resource.id);
-    setActiveKnowledgeSubject(resource.subject);
-    setReaderPage(resource.currentPage || "1");
-    setActiveKnowledgePanel("resources");
-    setActiveView("knowledge");
-    // Stabilization 1A-5: 记录最近打开页码（用于刷新后恢复阅读位置）
-    setResources((items) => items.map((item) => item.id === resource.id
-      ? { ...item, lastOpenedPage: resource.currentPage || "1", lastRead: "刚刚" }
-      : item));
-    setNotice(`已打开资料：${resource.name}`);
-  }
-
-  function resetUploadProgress() {
-    uploadProgressRunRef.current += 1;
-    uploadProgressTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
-    uploadProgressTimeoutsRef.current = [];
-    setFileUploadState(null);
-  }
-
-  function openResourceDialog() {
-    resetUploadProgress();
-    setActiveDialog("resource");
-  }
-
-  function closeResourceDialog() {
-    resetUploadProgress();
-    setActiveDialog(null);
-  }
-
-  function startUploadProgress(file: File, inferred: ReturnType<typeof inferResource>) {
-    resetUploadProgress();
-    const runId = uploadProgressRunRef.current;
-    setFileUploadState({ name: file.name, size: file.size, inferred, step: "uploading" });
-    const stages = [
-      ["extracting", 400],
-      ["identifying", 900],
-      ["parsing", 1500],
-      ["mapping", 2100],
-      ["done", 2600],
-    ] as const;
-    stages.forEach(([step, delay]) => {
-      const timeoutId = setTimeout(() => {
-        if (uploadProgressRunRef.current !== runId) return;
-        setFileUploadState((prev) => (prev && prev.name === file.name ? { ...prev, step } : prev));
-      }, delay);
-      uploadProgressTimeoutsRef.current.push(timeoutId);
-    });
-  }
-
-  function upsertMaterialFromResource(resource: Resource) {
-    const { material, sections } = buildMaterialBundle(resource, subjects);
-    setMaterials((items) => [material, ...items.filter((item) => item.id !== material.id)]);
-    setMaterialSections((items) => [...sections, ...items.filter((item) => item.materialId !== resource.id)]);
-    return { material, sections };
-  }
-
-  function addPlaceholderQuestionsForPastPaper(resource: Resource, sections: MaterialSection[]) {
-    const nextQuestions = buildPlaceholderQuestionsForPastPaper(resource, sections, exam, dateOnly(), makeId);
-    if (nextQuestions.length) {
-      setQuestions((items) => [...nextQuestions, ...items]);
-      setMaterialSections((items) => items.map((section) => {
-        const sectionQuestionIds = nextQuestions.filter((question) => question.sectionId === section.id).map((question) => question.id);
-        return sectionQuestionIds.length ? { ...section, questionIds: sectionQuestionIds } : section;
-      }));
-    }
-  }
-
-  async function addResource(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const fileValue = form.get("file");
-    const file = fileValue instanceof File && fileValue.name ? fileValue : null;
-    const isPdfFile = !!file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
-    if (file && !isPdfFile) {
-      pushAssistant("当前仅支持保存 PDF 文件。请转换为 PDF 后再上传。");
-      resetUploadProgress();
-      return;
-    }
-    const fallbackName = `${activeKnowledgeSubject || "未分科"}${activeKnowledgePanel === "questions" ? "空白真题卷" : "空白资料"}-${dateOnly()}`;
-    const rawName = String(file?.name || form.get("sourceText") || fallbackName).trim();
-    const inferred = inferResource(rawName, String(form.get("subjectHint") ?? ""));
-    const base: Resource = {
-      id: makeId("r"),
-      name: inferred.name,
-      subject: inferred.subject,
-      type: inferred.type,
-      author: inferred.name.includes("傅献彩") ? "傅献彩" : "AI待确认",
-      version: inferred.name.includes("傅献彩") ? "AI识别：第六版" : "AI待确认",
-      pages: inferred.pages,
-      status: "AI待确认",
-      fileName: file?.name ?? rawName,
-      recommendedRound: "第一轮",
-      recommendedLayer: inferred.recommendedLayer,
-      currentPage: "",
-      lastRead: "",
-      readingMinutes: "",
-      linkedNode: inferred.linkedNode,
-      kind: "demo",
-      createdAt: new Date().toISOString(),
-    };
-    // Stabilization 1A-1: 真实 PDF 文件 → IndexedDB（绝不写入 localStorage）
-    if (file && isPdfFile) {
-      try {
-        const stored = await savePdfFile(file);
-        const resource: Resource = {
-          ...base,
-          kind: "pdf",
-          fileStorageKey: stored.fileStorageKey,
-          size: stored.size,
-          mimeType: stored.mimeType,
-        };
-        resource.pages = `PDF 文件 · ${(stored.size / 1024).toFixed(1)} KB`;
-        // 上传即自动生效：不再进入「待确认」队列，直接可供阅读
-        setResources((items) => [resource, ...items]);
-        const { sections } = upsertMaterialFromResource(resource);
-        addPlaceholderQuestionsForPastPaper(resource, sections);
-        pushAssistant(`PDF 已保存并可阅读：${resource.name}。`);
-      } catch (err) {
-        pushAssistant(`PDF 保存失败：${String(err)}`);
-        closeResourceDialog();
-        return;
-      }
-    } else {
-      // 演示/非 PDF 资源：上传即自动生效，不再进入「待确认」队列
-      setResources((items) => [base, ...items]);
-      const { sections } = upsertMaterialFromResource(base);
-      addPlaceholderQuestionsForPastPaper(base, sections);
-      pushAssistant(`已添加演示/空白资料：${base.name}。`);
-    }
-    setActiveKnowledgeSubject(inferred.subject);
-    closeResourceDialog();
-  }
-
-  // ─── B-1: 待确认队列操作（确认 / 忽略）───
-  // 确认后按 kind 应用结果并移出队列；忽略则直接移出队列
-  function confirmPendingItem(item: PendingItem) {
-    setPending((items) => items.filter((p) => p.id !== item.id));
-    if (item.kind === "真题识别" && item.targetId) {
-      setQuestions((qitems) => qitems.map((q) => q.id === item.targetId ? { ...q, confirmed: true } : q));
-      setNotice(`已确认：${item.title}`);
-    } else if (item.kind === "资料切分" && item.targetId) {
-      setResources((ritems) => ritems.map((r) => r.id === item.targetId ? { ...r, status: "已索引" } : r));
-      setNotice(`已确认：${item.title}`);
-    } else {
-      setNotice(`已确认：${item.title}`);
-    }
-  }
-
-  function dismissPendingItem(item: PendingItem) {
-    setPending((items) => items.filter((p) => p.id !== item.id));
-    setNotice(`已忽略：${item.title}`);
-  }
-
-  function deleteResource(item: Resource) {
-    setLastDeleted({ collection: "resources", item, label: item.name });
-    setResources((items) => items.filter((resource) => resource.id !== item.id));
-    setMaterials((items) => items.filter((material) => material.id !== item.id));
-    setMaterialSections((items) => items.filter((section) => section.materialId !== item.id));
-    setQuestions((items) => items.filter((question) => question.materialId !== item.id));
-    // Stabilization 1A-6: 同步清理 IndexedDB 中的 PDF 二进制
-    if (item.kind === "pdf" && item.fileStorageKey) {
-      deletePdfFile(item.fileStorageKey).catch(() => {});
-    }
-    // 清理关联批注
-    setAnnotations((items) => items.filter((annotation) => annotation.resourceId !== item.id));
-    setNotice(`已删除资源：${item.name}`);
-  }
-
-  // ─── Stabilization 1A-3/1A-4: 批注创建 / 编辑 / 删除（持久化经 save effect）───
-  function onCreateAnnotation(page: string, selection: string, tag: Annotation["tag"], note: string) {
-    if (!activeResource) return;
-    const annotation: Annotation = {
-      id: makeId("a"),
-      resourceId: activeResource.id,
-      resourceName: activeResource.name,
-      page,
-      selection,
-      tag,
-      note,
-      linkedNode: activeResource.linkedNode || "待关联",
-      createdAt: today(),
-      handled: false,
-      updatedAt: today(),
-    };
-    setAnnotations((items) => [annotation, ...items]);
-    setNotice(`已添加批注：${selection.slice(0, 20)}`);
-  }
-
-  function onEditAnnotation(id: string, note: string) {
-    setAnnotations((items) => items.map((item) => item.id === id ? { ...item, note, updatedAt: today() } : item));
-  }
-
-  function onDeleteAnnotation(id: string) {
-    setAnnotations((items) => items.filter((item) => item.id !== id));
-    setNotice("已删除批注");
-  }
-
-  function deleteQuestion(item: Question) {
-    setLastDeleted({ collection: "questions", item, label: `${item.year} 第 ${item.number} 题` });
-    setQuestions((items) => items.filter((question) => question.id !== item.id));
-    setNotice(`已删除真题：${item.year} 第 ${item.number} 题`);
-  }
-
-  function deleteNode(item: KnowledgeNode) {
-    setLastDeleted({ collection: "nodes", item, label: item.knowledge });
-    setNodes((items) => items.filter((node) => node.id !== item.id));
-    setNotice(`已删除知识点：${item.knowledge}`);
-  }
-
-  // ─── 卡片组管理：创建 / 重命名（内联）/ 删除（确认框）───
-  function addCategoryInline() {
-    const name = newCardDeckName.trim().slice(0, 30);
-    if (!name) { setNotice("名称不能为空"); return; }
-    if (subjectCategories.some((c) => c.name === name)) { setNotice("卡片组名称已存在"); return; }
-    const subject = subjects.find((s) => s.name === activeCardSubject);
-    if (!subject) return;
-    const now = today();
-    setCategories((items) => [...items, { id: makeId("cat"), subjectId: subject.id, name, createdAt: now, updatedAt: now }]);
-    setNewCardDeckOpen(false);
-    setNewCardDeckName("");
-    setNotice(`已新建卡片组：${name}`);
-  }
-
-  // 卡片移动到当前学科内的其他分类（不能跨学科移动）
-  function moveCardToCategory(cardId: string, categoryId: string) {
-    setCards((items) => items.map((c) => c.id === cardId
-      ? { ...c, categoryId: categoryId || undefined }
-      : c));
-  }
-  function reviewCard(id: string, mastery: GrowthCard["mastery"]) {
-    const card = cards.find((c) => c.id === id);
-    const intervalDays = mastery === "不会" ? 1 : mastery === "模糊" ? 3 : mastery === "认识" ? 7 : mastery === "熟练" ? 14 : 30;
-    setCards((items) => items.map((card) => card.id === id ? { ...card, mastery, lastReviewed: today(), nextReviewAt: dateOnly(intervalDays) } : card));
-    const interval = mastery === "不会" ? "明天" : mastery === "模糊" ? "3 天后" : mastery === "认识" ? "7 天后" : mastery === "熟练" ? "14 天后" : "30 天后";
-    pushAssistant(`已记录卡片掌握状态：${mastery}。下次建议复习：${interval}。`);
-    // LearningEvent: card_reviewed（Sprint 1 / Phase A，纯副作用采集）
-    setLearningEvents((prev) => appendLearningEvent(prev, {
-      type: "card_reviewed",
-      sourceRef: {
-        kind: "card",
-        id,
-        subjectId: card?.subject,
-        nodeIds: nodes.filter((n) => n.knowledge === card?.knowledge || n.core === card?.core).map((n) => n.id),
-      },
-      payload: { mastery, intervalDays },
-    }));
-    setCardFlipped(false);
-    // 卡片组内复习队列推进（卡片组 → 卡片 的信息层级）
-    setCardIndex((index) => Math.min(index + 1, Math.max(categoryReviewQueue.length - 1, 0)));
-  }
-  function moveCard(step: number) {
-    setCardFlipped(false);
-    // 卡片组内复习队列推进（卡片组 → 卡片 的信息层级）
-    setCardIndex((index) => Math.min(Math.max(index + step, 0), Math.max(categoryReviewQueue.length - 1, 0)));
-  }
-
-  // 键盘快捷键 (仅当在卡片组学习空间「待复习」视图时生效)
+  // ─── Storage Contract 1C-1: 唯一 hydrate 入口（v5 优先；v3/v4 自动迁移，可回滚）───
+  // 置于 useWorkspaceHandlers 之后：内部使用 runTimerFrom（若在 handlers 声明前调用会 TDZ）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      // P0 修复（交互审查 2026-08-01）：输入框/文本域聚焦时忽略快捷键，避免打字误触翻面/评分
-      const target = e.target as HTMLElement | null;
-      const tagName = target?.tagName ?? "";
-      if (tagName === "INPUT" || tagName === "TEXTAREA" || target?.isContentEditable) return;
-
-      if (activeView !== "cards" || !cardSubjectView || !activeCardCategory || cardSubView !== "待复习" || !activeGroupCard) return;
-      if (e.key === " " || e.key === "Space") { e.preventDefault(); setCardFlipped((v) => !v); }
-      else if (e.key === "ArrowLeft") moveCard(-1);
-      else if (e.key === "ArrowRight") moveCard(1);
-      else if (e.key === "1") reviewCard(activeGroupCard.id, "认识");
-      else if (e.key === "2") reviewCard(activeGroupCard.id, "模糊");
-      else if (e.key === "3") reviewCard(activeGroupCard.id, "不会");
+    const data = hydrateWorkspace();
+    setBootChecked(true);
+    if (!data) {
+      requestAnimationFrame(() => requestAnimationFrame(() => setAppReady(true)));
+      return; // 无任何存档 → 新用户，onboardingCompleted 保持 false → 显示初始化向导
     }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-    // moveCard/reviewCard 每次渲染重建但语义稳定；此处依赖已覆盖会影响行为的状态
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, cardSubjectView, activeCardCategory, cardSubView, activeGroupCard, categoryReviewQueue, cardFlipped]);
-
-  // ─── Growth Cards handlers ───
-  function safeCardCategoryForSubject(categoryId: string | undefined, subjectName: string) {
-    if (!categoryId) return "";
-    const subject = subjects.find((item) => item.name === subjectName);
-    return subject && categories.some((cat) => cat.id === categoryId && cat.subjectId === subject.id) ? categoryId : "";
-  }
-
-  function openNewCardDialog() {
-    const subject = activeCardSubject || currentSubject?.name || subjects[0]?.name || "";
-    const candidateCategory = activeCardCategory && activeCardCategory !== ALL_GROUPS && activeCardCategory !== UNCATEGORIZED ? activeCardCategory : "";
-    setEditingCardId(null);
-    setCardDialogSubject(subject);
-    setCardDialogCategory(safeCardCategoryForSubject(candidateCategory, subject));
-    setActiveDialog("card");
-  }
-
-  function openEditCardDialog(card: GrowthCard) {
-    const subject = card.subject || activeCardSubject || subjects[0]?.name || "";
-    setEditingCardId(card.id);
-    setCardDialogSubject(subject);
-    setCardDialogCategory(safeCardCategoryForSubject(card.categoryId, subject));
-    setActiveDialog("card");
-  }
-
-  function createCardFromText(createdBy: GrowthCard["createdBy"], text: string, annotation?: Annotation) {
-    const card: GrowthCard = {
-      id: makeId("c"),
-      title: annotation ? `${annotation.selection}：${annotation.tag}` : "AI 生成成长卡片",
-      front: annotation?.selection ?? "请回忆这条内容的核心结论。",
-      back: annotation ? `${annotation.selection}\n${annotation.note}` : text,
-      type: text.includes("填空") ? "填空卡" : text.includes("推导") ? "推导卡" : text.includes("条件") ? "条件辨析卡" : "公式卡",
-      subject: currentSubject?.name ?? "未分科",
-      core: nodes[0]?.core ?? "待关联",
-      branch: nodes[0]?.branch ?? "待关联",
-      knowledge: nodes[0]?.knowledge ?? "待关联",
-      source: annotation?.resourceName ?? activeResource?.name ?? "AI 对话",
-      page: annotation?.page ?? activeResource?.currentPage ?? "",
-      modes: ["背诵", text.includes("填空") ? "填空" : "条件辨析"],
-      createdBy,
-      createdAt: today(),
-      lastReviewed: "未复习",
-      nextReviewAt: dateOnly(),
-      mastery: "模糊",
-      note: annotation?.note ?? "",
-      favorite: false,
-    };
-    setCards((items) => [card, ...items]);
-    setActiveCardSubject(card.subject);
-    if (annotation) setAnnotations((items) => items.map((item) => item.id === annotation.id ? { ...item, handled: true } : item));
-    pushAssistant(`已创建成长卡片：${card.title}`);
-  }
-
-  function deleteCard(item: GrowthCard) {
-    setLastDeleted({ collection: "cards", item, label: item.title });
-    setCards((items) => items.filter((card) => card.id !== item.id));
-    setNotice(`已删除卡片：${item.title}`);
-  }
-
-  function openCardSource(card: GrowthCard) {
-    const relatedResource = resources.find((r) => r.name.includes(card.source) || card.source.includes(r.name));
-    if (relatedResource) {
-      setActiveResourceId(relatedResource.id);
-      setActiveKnowledgeSubject(relatedResource.subject);
-      setReaderPage(card.page || relatedResource.currentPage || "1");
-      setActiveKnowledgePanel("resources");
-      setActiveView("knowledge");
-      setNotice(`已打开来源：${card.source}`);
-    } else {
-      pushAssistant(`未找到卡片来源资源：${card.source}`);
-    }
-  }
-
-  function showRelatedQuestions(core: string, keyword = "", subject = activeCardSubject || currentSubject?.name || activeKnowledgeSubject || "") {
-    // UX Sprint（学科隔离）: 相关真题严格锁定当前科目，不允许跨学科展示
-    const targetSubject = subject || activeKnowledgeSubject || "";
-    setQuestionFilter({ subject: targetSubject, core, result: "全部", keyword });
-    setActiveKnowledgeSubject(targetSubject);
-    setActiveKnowledgePanel("questions");
-    setActiveView("knowledge");
-  }
-
-  // ─── Dashboard handlers ───
-  function updateTask(id: string, patch: Partial<Task>) {
-    setTasks((items) => items.map((task) => task.id === id ? { ...task, ...patch } : task));
-  }
-
-  // 每个任务对某一天的学习记录只计一次，避免反复勾选/多入口重复累加（#8）
-  function recordTaskDone(task: Task, minutes: number) {
-    const date = dateOnly();
-    if (task.countedForDate === date) return;
-    recordStudyDay(minutes, 1);
-    updateTask(task.id, { countedForDate: date });
-  }
-
-  function recordTaskUndone(task: Task) {
-    if (!task.countedForDate) return;
-    const minutes = Number(task.actualMinutes || task.minutes || 0);
-    recordStudyDay(-minutes, -1); // 反向抵扣当天的计入
-    updateTask(task.id, { countedForDate: "" });
-  }
-
-  function toggleTaskDone(task: Task) {
-    const nextDone = !task.done;
-    updateTask(task.id, { done: nextDone });
-    if (nextDone) recordTaskDone(task, task.actualMinutes !== "" ? Number(task.actualMinutes) : (task.minutes || 0));
-    else recordTaskUndone(task);
-  }
-
-  function moveTask(id: string, direction: -1 | 1) {
-    const index = tasks.findIndex((task) => task.id === id);
-    const target = index + direction;
-    if (index < 0) return;
-    if (target < 0 || target >= tasks.length) {
-      setNotice(direction < 0 ? "已经是最高优先级" : "已经是最低优先级");
-      return;
-    }
-    setTasks((items) => {
-      const currentIndex = items.findIndex((task) => task.id === id);
-      const currentTarget = currentIndex + direction;
-      if (currentIndex < 0 || currentTarget < 0 || currentTarget >= items.length) return items;
-      const next = [...items];
-      [next[currentIndex], next[currentTarget]] = [next[currentTarget], next[currentIndex]];
-      return next;
-    });
-    setNotice(direction < 0 ? "已提高优先级" : "已降低优先级");
-  }
-
-  function stopTimer() {
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = undefined;
-    }
-  }
-
-  // 以给定起点（墙钟 ms）开始/恢复一个运行段；interval 仅按时间戳重算显示值，
-  // 因此后台节流也不会少算，刷新后用持久化的起点即可无缝续计。
-  function runTimerFrom(accumSeconds: number, startEpoch: number) {
-    setTimerAccumSeconds(accumSeconds);
-    setTimerRunStartEpoch(startEpoch);
-    const compute = () => accumSeconds + Math.max(0, Math.floor((Date.now() - startEpoch) / 1000));
-    setElapsedSeconds(compute());
-    stopTimer();
-    timerIntervalRef.current = setInterval(() => setElapsedSeconds(compute()), 1000);
-  }
-
-  // 当前真实已学秒数（不依赖 interval 的最后一次 tick）
-  function currentElapsedSeconds() {
-    return timerRunStartEpoch > 0
-      ? timerAccumSeconds + Math.max(0, Math.floor((Date.now() - timerRunStartEpoch) / 1000))
-      : timerAccumSeconds;
-  }
-
-  function startTask(task: Task) {
-    const now = new Date();
-    const startTimeStr = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-    setTimerStartTime(startTimeStr);
-    setActiveTimerTaskId(task.id);
-    setCompletionModalAllowEditTime(false);
-    setCompletionModalCustomMinutes("");
-    updateTask(task.id, { status: "学习中", startedAt: startTimeStr });
-    runTimerFrom(0, Date.now());
-    // UX Sprint: 用户主动开始新学习段 → 清除该任务的历史草稿（明确的新会话意图）
-    setStudyDraft((prev) => (prev && prev.taskId === task.id ? null : prev));
-    setNotice(`开始学习：${task.title}`);
-  }
-
-  function pauseTimer(task: Task) {
-    stopTimer();
-    const total = currentElapsedSeconds();
-    setTimerAccumSeconds(total);
-    setTimerRunStartEpoch(0);
-    setElapsedSeconds(total);
-    updateTask(task.id, { status: "暂停" });
-  }
-
-  function resumeTimer(task: Task) {
-    updateTask(task.id, { status: "学习中" });
-    runTimerFrom(timerAccumSeconds, Date.now());
-  }
-
-  function handleEndLearning(task: Task) {
-    stopTimer();
-    const totalSeconds = currentElapsedSeconds();
-    setElapsedSeconds(totalSeconds);
-    setTimerRunStartEpoch(0);
-    const elapsedMin = Math.max(TASK.minElapsedMinutes, Math.round(totalSeconds / 60));
-    setCompletionModalCustomMinutes(String(elapsedMin));
-    setCompletionModalAllowEditTime(false);
-    setCompletionModalCustomEndTime(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" }));
-    setActiveTaskId(task.id);
-    setActiveDialog("task");
-    setActiveTimerTaskId("");
-    // UX Sprint: 结束学习 → 自动保存草稿（计时/掌握程度/学习状态/正确率/困难原因；关闭不丢失）
-    setStudyDraft({
-      taskId: task.id,
-      elapsedSeconds: totalSeconds,
-      customMinutes: String(elapsedMin),
-      mastery: task.mastery,
-      accuracy: task.accuracy,
-      mood: task.mood,
-      note: task.note,
-      dirty: false,
-    });
-  }
-
-  // ─── UX Sprint: 学习结束弹窗统一入口（恢复草稿 / 初始化）───
-  function openTaskDialog(task: Task) {
-    const draft = studyDraft && studyDraft.taskId === task.id ? studyDraft : null;
-    setActiveTaskId(task.id);
-    setActiveDialog("task");
-    if (draft) {
-      // 恢复草稿：计时与全部表单值；计时从已累计秒数续接（不丢失）
-      setElapsedSeconds(draft.elapsedSeconds);
-      setTimerAccumSeconds(draft.elapsedSeconds);
-      setTimerRunStartEpoch(0);
-      setCompletionModalCustomMinutes(draft.customMinutes);
-      setCompletionModalAllowEditTime(false);
-      updateTask(task.id, {
-        mastery: draft.mastery,
-        accuracy: draft.accuracy,
-        mood: draft.mood,
-        note: draft.note,
-      });
-      setNotice(`已恢复未完成的学习记录：${task.title}`);
-    } else {
-      setElapsedSeconds(0);
-      setTimerAccumSeconds(0);
-      setTimerRunStartEpoch(0);
-      setCompletionModalCustomMinutes(String(Math.max(TASK.minElapsedMinutes, Number(task.actualMinutes || 0) || 0)));
-      setCompletionModalAllowEditTime(false);
-    }
-    setCompletionModalCustomEndTime(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" }));
-  }
-
-  // UX Sprint: 表单任意字段修改 → 标记草稿 dirty（关闭时触发确认；草稿本身已持久化）
-  function markTaskDraftDirty(task: Task, patch: Partial<Pick<StudyDraft, "mastery" | "accuracy" | "mood" | "note" | "customMinutes" | "elapsedSeconds">>) {
-    setStudyDraft((prev) => {
-      const base = prev && prev.taskId === task.id
-        ? prev
-        : {
-            taskId: task.id,
-            elapsedSeconds: currentElapsedSeconds(),
-            customMinutes: completionModalCustomMinutes,
-            mastery: task.mastery,
-            accuracy: task.accuracy,
-            mood: task.mood,
-            note: task.note,
-          };
-      return { ...base, ...patch, dirty: true };
-    });
-  }
-
-  // UX Sprint: 关闭学习结束弹窗 → 存在未保存内容时先弹确认，否则直接关闭
-  function requestCloseTaskDialog() {
-    if (studyDraft && studyDraft.taskId === activeTaskId && studyDraft.dirty) {
-      setCloseConfirmPending(true);
-    } else {
-      setActiveDialog(null);
-    }
-  }
-
-  function completeTask(id: string) {
-    const task = tasks.find((item) => item.id === id);
-    if (!task) return;
-    // P1 交互修复（深入审查 2026-08-01）：自定义分钟 / 正确率做输入校验，拒绝空值、非数字、负数、超界
-    // 避免 NaN / 负时长污染 studyDays 与掌握度事件
-    let actualMinutesValue = completionModalAllowEditTime ? completionModalCustomMinutes : (task.actualMinutes || String(Math.max(1, Math.round(elapsedSeconds / 60))));
-    const parsedMinutes = Number(actualMinutesValue);
-    if (!Number.isFinite(parsedMinutes) || parsedMinutes <= 0) {
-      setNotice("实际分钟数无效，已保留自动计算值");
-      actualMinutesValue = String(Math.max(1, Math.round(elapsedSeconds / 60)));
-    } else {
-      actualMinutesValue = String(Math.round(parsedMinutes));
-    }
-    let accuracyNumber = Number(task.accuracy || 0);
-    if (!Number.isFinite(accuracyNumber) || accuracyNumber < 0) accuracyNumber = 0;
-    if (accuracyNumber > 100) accuracyNumber = 100;
-    // UX Sprint: 保存并完成才真正生成学习记录 → 清空该任务草稿
-    setStudyDraft((prev) => (prev && prev.taskId === id ? null : prev));
-    const endTimeStr = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
-    updateTask(id, {
-      done: true,
-      status: "已完成",
-      actualMinutes: actualMinutesValue,
-      accuracy: String(accuracyNumber),
-      completedAt: endTimeStr,
-    });
-    recordTaskDone(task, Number(actualMinutesValue || task.minutes || 0));
-    // LearningEvent: study_completed（Sprint 1 / Phase A，纯副作用采集）
-    setLearningEvents((prev) => appendLearningEvent(prev, {
-      type: "study_completed",
-      sourceRef: {
-        kind: "task",
-        id: task.id,
-        subjectId: task.subject,
-        nodeIds: nodes.filter((n) => n.knowledge === task.branch || n.core === task.core).map((n) => n.id),
-      },
-      payload: {
-        minutes: Number(actualMinutesValue || task.minutes || 0),
-        accuracy: accuracyNumber || undefined,
-        masteryBefore: task.masteryBefore ?? undefined,
-        masteryAfter: task.masteryAfter ?? undefined,
-      },
-    }));
-    if (accuracyNumber && accuracyNumber < 60) {
-      setNodes((items) => items.map((node) =>
-        node.knowledge === task.branch || node.core === task.core
-          ? { ...node, masteryScore: Math.max(0, node.masteryScore - 8), masteryLevel: Math.max(0, node.masteryLevel - 1), mistakes: node.mistakes + 1, reviewRisk: "高风险" }
-          : node
-      ));
-    }
-  }
-
-  function generatePlan(input = "手动重新安排今天") {
-    const highRiskNode = nodes.find((node) => node.reviewRisk === "高风险") ?? nodes[0];
-    if (!highRiskNode) return;
-    const nextTasks: Task[] = [{
-      id: makeId("t"),
-      title: `回看 ${highRiskNode.knowledge}`,
-      subject: highRiskNode.subject,
-      core: highRiskNode.core,
-      branch: highRiskNode.branch,
-      round: highRiskNode.round,
-      layer: highRiskNode.layer,
-      source: resources.find((r) => r.subject === highRiskNode.subject)?.name ?? "已上传资料",
-      range: "关联章节和错题",
-      minutes: 60,
-      standard: "能够复述核心条件并完成相似题。",
-      reason: `${highRiskNode.knowledge} 错题 ${highRiskNode.mistakes} 次，遗忘风险 ${highRiskNode.reviewRisk}。`,
-      backup: "",
-      done: false,
-      actualMinutes: "",
-      difficulty: "2",
-      mastery: "有些模糊",
-      accuracy: "",
-      needReview: true,
-      mood: "正常",
-      note: "",
-      status: "待开始",
-      aiRecommended: true,
-      aiReasonForgetRate: `遗忘风险 ${highRiskNode.reviewRisk}`,
-      aiReasonLayerStable: `${highRiskNode.layer} 尚未稳定`,
-      aiReasonMistakeCount: `错题 ${highRiskNode.mistakes} 次`,
-      aiReasonExamFrequency: "属于高频考点",
-      startedAt: "",
-      estimatedCompletionMinutes: 60,
-      masteryBefore: highRiskNode.masteryScore,
-      masteryAfter: Math.min(100, highRiskNode.masteryScore + 20),
-      completedAt: "",
-      relatedCardIds: [],
-      relatedQuestionIds: [],
-    }];
-    setTasks(nextTasks);
-    addLog(input, `生成 ${nextTasks.length} 个任务，优先 ${highRiskNode.core} / ${highRiskNode.knowledge}`);
-  }
-
-  // Material-First（2026-08-01）：AI 分析一份资料 → 解析章节/题目/知识点/七核
-  // 当前先展示解析链步骤演示；接真模型后替换 result 来源（见 analyze-exam）
-  async function analyzeMaterial(resource: Resource) {
-    if (examAnalyzing) return;
-    materialAnalysisTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
-    materialAnalysisTimeoutsRef.current = [];
-    const runId = materialAnalysisRunRef.current + 1;
-    materialAnalysisRunRef.current = runId;
-    setExamAnalyzing(true);
-    setActiveResourceId(resource.id);
-    setActiveKnowledgeSubject(resource.subject);
-    setActiveView("knowledge");
-    setActiveKnowledgePanel("resources");
-    // 解析链步骤（Match 用户「AI 分析资料」流程）
-    const steps: AgentStep[] = [
-      "解析资料类型", "识别章节/套卷", "抽取题目", "归纳知识点", "提取高频考点", "形成七核", "更新知识图谱",
-    ].map((title) => ({ id: makeId("a"), title, status: "等待" } as AgentStep));
-    setAgentSteps(steps);
-    pushSystem(`正在 AI 分析资料：${resource.name}…`, "action");
-    steps.forEach((step, i) => {
-      const timeoutId = setTimeout(async () => {
-        if (materialAnalysisRunRef.current !== runId) return;
-        const resourceStillExists = resourcesRef.current.some((item) => item.id === resource.id);
-        if (!resourceStillExists) {
-          if (i === steps.length - 1) setExamAnalyzing(false);
+    try {
+      // ─── 2026-08-03 时间修复：检测旧演示存档的 seed 日期 ───
+      // 早期 demo 曾把固定日期（2026-12-20 / 2026-07-30）写入存档，
+      // 导致用户看到错误的倒计时/热力图。检测到这类 seed 值 → 视为无效存档，
+      // 重置为新用户并重新走初始化向导（真实用户的考试日期不会是这些 seed 值）。
+      if (data.exam) {
+        const seedExamDate = data.exam.examDate;
+        const seedCreated = data.exam.examGoalCreatedAt;
+        const isLegacyDemoSeed = seedExamDate === "2026-12-20" || seedCreated === "2026-07-30";
+        // 2026-08-04 修复：仅对「未完成引导的旧 demo 存档」重置为新用户。
+        // 若存档已显式完成引导（onboardingCompleted=true，如 E2E 种子），
+        // 不触发重置——避免已引导用户被误判为无效存档，也避免测试种子被拦截。
+        if (isLegacyDemoSeed && !data.onboardingCompleted) {
+          setOnboardingCompleted(false);
           return;
         }
-        setAgentSteps((prev) => prev.map((s) => s.id === step.id ? { ...s, status: "完成" } : s));
-        if (i === steps.length - 1) {
-          const subjectId = subjects.find((subject) => subject.name === resource.subject)?.id ?? resource.subject;
-          const m = resourceToMaterial(resource, subjectId);
-          let aiNodes: KnowledgeNode[] = [];
-          if (resource.type.includes("真题")) {
-            const materialQuestions = questions.filter((question) => question.materialId === resource.id || question.source.includes(resource.name));
-            const result = await analyzeExam(resource.subject, materialQuestions);
-            if (result.ok) {
-              aiNodes = result.nodes
-                .filter((node) => node.knowledge && !nodes.some((existing) => existing.subject === resource.subject && existing.knowledge === node.knowledge))
-                .map((node) => ({
-                  id: makeId("k"),
-                  subject: resource.subject,
-                  core: node.core || "核心考点",
-                  branch: node.branch || "",
-                  knowledge: node.knowledge,
-                  explanation: `AI 正式（DeepSeek）：${node.reason}`.slice(0, 300),
-                  prerequisite: "",
-                  related: resource.name,
-                  masteryLevel: 0,
-                  masteryScore: 20,
-                  confidence: "低",
-                  round: currentSubject?.round || "第一轮",
-                  layer: currentSubject?.layer || "Layer 1",
-                  mistakes: 0,
-                  reviewRisk: "正常",
-                  isMonthlyFocus: false,
-                }));
-              if (aiNodes.length) setNodes((items) => [...aiNodes, ...items]);
-              setNotes((items) => [{
-                id: makeId("n"),
-                title: `资料分析（AI 正式 · DeepSeek）：${resource.name}`,
-                body: `高频核心：${result.cores.map((core) => `${core.name}(${core.frequency})`).join("、") || "—"}`,
-                tags: ["AI正式", "资料分析", resource.subject],
-              }, ...items]);
-            } else {
-              pushSystem(`演示回复（${analyzeErrorReason(result.error)}，资料解析未接真模型）`, "action");
-            }
-          }
-          setResources((items) => items.map((r) => r.id === resource.id ? { ...r, status: "已索引" } : r));
-          setMaterials((items) => items.map((material) => material.id === resource.id
-            ? {
-              ...m,
-              status: "analyzed",
-              analysis: {
-                sectionsCount: materialSections.filter((section) => section.materialId === resource.id).length || 1,
-                questionsCount: questions.filter((question) => question.materialId === resource.id || question.source.includes(resource.name)).length,
-                knowledgePointCount: nodes.filter((node) => node.subject === resource.subject).length + aiNodes.length,
-                coreConcepts: Array.from(new Set([...nodes.filter((node) => node.subject === resource.subject).map((node) => node.core), ...aiNodes.map((node) => node.core)])).slice(0, 8),
-                highFrequencyPoints: Array.from(new Set(questions.filter((question) => question.subject === resource.subject).map((question) => question.knowledge))).filter(Boolean).slice(0, 8),
-                analyzedAt: new Date().toISOString(),
-              },
-            }
-            : material));
-          setMaterialSections((items) => items.map((section) => section.materialId === resource.id ? { ...section, analyzed: true } : section));
-          pushAssistant(`「${resource.name}」AI 分析完成：识别 ${m.type}，生成解析链（章节→题目→知识点→七核）。`, "record");
-          setExamAnalyzing(false);
+        setExam(normalizeExamGoal(data.exam));
+      }
+      // 老用户（已有存档但无该字段）默认视为已完成，不再弹向导
+      setOnboardingCompleted(data.onboardingCompleted ?? true);
+      if (data.appSettings) setAppSettings(data.appSettings);
+      if (data.subjects) setSubjects(data.subjects);
+      if (data.activeKnowledgeSubject) setActiveKnowledgeSubject(data.activeKnowledgeSubject);
+      if (data.activeCardSubject) setActiveCardSubject(data.activeCardSubject);
+      if (data.resources) setResources(data.resources);
+      if (data.materials && Array.isArray(data.materials)) {
+        setMaterials(data.materials);
+      } else if (data.resources?.length) {
+        setMaterials(data.resources.map((resource) => resourceToMaterial(
+          resource,
+          data.subjects?.find((subject) => subject.name === resource.subject)?.id ?? resource.subject,
+        )));
+      }
+      if (data.materialSections && Array.isArray(data.materialSections)) {
+        setMaterialSections(data.materialSections);
+      } else if (data.resources?.length) {
+        setMaterialSections(data.resources.flatMap((resource) => resourceToMaterialSections(resource, data.questions ?? [])));
+      }
+      if (data.questions) setQuestions(data.questions);
+      // 2026-08-06 产品需求：老用户加载存档时也注入内置真题（政治/英语一/数学二，与 completeOnboarding 保持一致）
+      const hydSubjectNames = ((data.subjects ?? []) as { name: string }[]).map((s) => s.name);
+      const hydHasPolitics = hydSubjectNames.some((name) => name.includes("政治"));
+      const hydHasEnglish = hydSubjectNames.some((name) => name.includes("英语"));
+      const hydHasMath = hydSubjectNames.some((name) => name.includes("数学"));
+      const hydSeedPapers = seedResources.filter((r) =>
+        r.type === "真题"
+        && ((hydHasPolitics && r.subject === "政治") || (hydHasEnglish && r.subject === "英语一") || (hydHasMath && r.subject === "数学二"))
+      );
+      const hydExistingResourceIds = ((data.resources ?? []) as { id: string }[]).map((r) => r.id);
+      const hydMissingPapers = hydSeedPapers.filter((p) => !hydExistingResourceIds.includes(p.id));
+      if (hydMissingPapers.length > 0) {
+        setResources((items) => [...hydMissingPapers, ...items]);
+        const hydQuestions = seedQuestions.filter((q) =>
+          !((data.questions ?? []) as { id: string }[]).some((ex) => ex.id === q.id)
+          && seedResources.some((r) => r.id === q.materialId && hydMissingPapers.some((p) => p.id === r.id))
+        );
+        setQuestions((items) => [...hydQuestions, ...items]);
+      }
+      if (data.nodes) setNodes(data.nodes);
+      if (data.tasks) setTasks(data.tasks);
+      if (data.pending) setPending(data.pending);
+      if (data.notes) setNotes(data.notes);
+      if (data.cards) setCards(data.cards);
+      // UX Sprint: 恢复自定义分类（按 subjectId 隔离，不跨学科）
+      if (data.cardCategories && Array.isArray(data.cardCategories)) setCategories(data.cardCategories);
+      if (data.annotations) setAnnotations(data.annotations);
+      if (data.activeResourceId) setActiveResourceId(data.activeResourceId);
+      if (data.readerSearch) setReaderSearch(data.readerSearch);
+      if (data.readerPage) setReaderPage(data.readerPage);
+      if (data.readerZoom) setReaderZoom(data.readerZoom);
+      if (data.studyDays) setStudyDays(data.studyDays);
+      if (data.agentSteps) setAgentSteps(data.agentSteps);
+      if (data.logs) setLogs(data.logs);
+      // UX Sprint P0: 兼容历史数据（旧 chat 数组）→ 迁移为单一 ChatSession（不丢失历史）
+      if (data.chatSessions && Array.isArray(data.chatSessions) && data.chatSessions.length > 0) {
+        const restoredSessionId = data.activeSessionId || data.chatSessions[0].id;
+        setChatSessions(data.chatSessions);
+        setActiveSessionId(restoredSessionId);
+        activeSessionIdRef.current = restoredSessionId;
+      } else if (data.chat) {
+        const legacySession = migrateLegacyChat(data.chat);
+        if (legacySession) {
+          setChatSessions([legacySession]);
+          setActiveSessionId(legacySession.id);
+          activeSessionIdRef.current = legacySession.id;
         }
-      }, 350 * (i + 1));
-      materialAnalysisTimeoutsRef.current.push(timeoutId);
-    });
-  }
-
-  // 真题分析（首个真 AI 意图）：调 DeepSeek 提取高频考点/七核并写入图谱；
-  // 无 key / 失败 → 优雅降级到演示逻辑，并明确标注「演示回复」，绝不伪装成真实分析。
-  async function runExamAnalysis(subjectName: string) {
-    if (examAnalyzing) return;
-    setExamAnalyzing(true);
-    try {
-    const subjectQuestions = questions.filter((q) => q.subject === subjectName);
-    const steps: AgentStep[] = ["分析真题", "更新知识图谱", "生成学习笔记"].map((title) => ({ id: makeId("a"), title, status: "等待" }));
-    setAgentSteps(steps);
-    pushSystem(`正在用 DeepSeek 分析 ${subjectName || "当前科目"} 的真题…`, "action");
-
-    const result = await analyzeExam(subjectName, subjectQuestions);
-
-    if (result.ok && (result.cores.length > 0 || result.nodes.length > 0)) {
-      const coreSummary = result.cores.slice(0, 5).map((c) => `${c.name}(${c.frequency})`).join("、");
-      // 依据 AI 结果新增知识图谱节点（按知识点去重，明确标注来源）
-      const newNodes: KnowledgeNode[] = result.nodes
-        .filter((n) => n.knowledge && !nodes.some((ex) => ex.subject === subjectName && ex.knowledge === n.knowledge))
-        .map((n) => ({
-          id: makeId("k"),
-          subject: subjectName,
-          core: n.core || "核心考点",
-          branch: n.branch || "",
-          knowledge: n.knowledge,
-          explanation: `AI 正式（DeepSeek）：${n.reason}`.slice(0, 300),
-          prerequisite: "",
-          related: "",
-          masteryLevel: 0,
-          masteryScore: 20,
-          confidence: "低",
-          round: currentSubject?.round || "第一轮",
-          layer: currentSubject?.layer || "Layer 1",
-          mistakes: 0,
-          reviewRisk: "正常",
-          isMonthlyFocus: false,
-        }));
-      if (newNodes.length) setNodes((items) => [...newNodes, ...items]);
-      setPending((items) => [{ id: makeId("p"), kind: "图谱更新", title: `AI 正式分析：${subjectName} 高频考点`, subject: subjectName || "未分科", detail: `DeepSeek 识别 ${result.cores.length} 个核心、新增 ${newNodes.length} 个知识点；高频：${coreSummary || "—"}`, status: "待确认" }, ...items]);
-      setNotes((items) => [{ id: makeId("n"), title: `真题分析（AI 正式 · DeepSeek）：${subjectName}`, body: `高频核心：${coreSummary || "—"}\n建议知识点：\n${result.nodes.slice(0, 12).map((n) => `· ${n.core}/${n.knowledge}——${n.reason}`).join("\n")}`, tags: ["AI正式", "真题分析", subjectName] }, ...items]);
-      setAgentSteps(steps.map((s) => ({ ...s, status: "完成" })));
-      pushSystem(`AI 正式分析完成（DeepSeek）：${result.cores.length} 个高频核心、新增 ${newNodes.length} 个知识点。`, "action");
-    } else {
-      // 降级演示（明确标注，不误导）
-      const core = nodes.find((n) => n.subject === subjectName)?.core ?? "核心考点";
-      const knowledge = nodes.find((n) => n.subject === subjectName)?.knowledge ?? "起始考点";
-      setPending((items) => [{ id: makeId("p"), kind: "图谱更新", title: "真题分析结果（演示）", subject: subjectName || "未分科", detail: `建议提高 ${core} / ${knowledge} 的复习优先级`, status: "待确认" }, ...items]);
-      setNotes((items) => [{ id: makeId("n"), title: "真题分析学习笔记（演示）", body: `演示回复：集中指向 ${core} / ${knowledge}。先补适用条件，再做综合题。`, tags: ["演示", "真题分析", core] }, ...items]);
-      setAgentSteps(steps.map((s) => ({ ...s, status: "完成" })));
-      pushSystem(`演示回复（${analyzeErrorReason(result.error)}，未接真模型）`, "action");
-    }
-    } finally {
-      setExamAnalyzing(false);
-    }
-  }
-
-  // 错因分析（第 2 个真 AI 意图）：取本学科最近的错题 → DeepSeek 归因 + 分层建议；
-  // 无 key / 失败 → 优雅降级到规则回复，并明确标注「演示回复」。
-  async function runMistakeAnalysis(subjectName: string) {
-    const subject = subjectName || currentSubject?.name || "";
-    const mistakes = questions.filter((q) => q.subject === subject && q.result === "错误").slice(0, 12);
-    if (mistakes.length === 0) {
-      pushAssistant(`当前 ${subject || "科目"} 暂无已标记「错误」的真题，可在真题库做题记录中标记错题。`);
-      return;
-    }
-    pushSystem(`正在用 DeepSeek 分析 ${subject || "当前科目"} 的错因…`, "action");
-    const result = await analyzeMistakes(subject, mistakes);
-    if (result.ok && result.mistakes.length > 0) {
-      const lines = result.mistakes.map((m) => `· ${m.reason}：${m.detail}（${m.questionRef}）→ ${m.suggestion}`).join("\n");
-      pushAssistant(`错因分析（AI 正式 · DeepSeek）：${result.summary}\n${lines}`);
-    } else {
-      pushAssistant(`演示回复（${mistakesErrorReason(result.error)}，未接真模型）：近期错题集中在 ${mistakes[0]?.core || "核心考点"} 的适用条件判断，建议先重看条件再专项练习。`);
-    }
-  }
-
-  async function runAgentWorkflow(input: string) {
-    await runExamAnalysis(currentSubject?.name ?? "");
-    generatePlan(input);
-  }
-
-  // 今日计划真生成（第 3 个真 AI 意图）：DeepSeek 基于知识点/错题/科目时长生成多任务计划；
-  // 无 key / 失败 → 降级到本地 generatePlan，并诚实标注「演示回复」。
-  async function runPlanGeneration() {
-    pushSystem("正在用 DeepSeek 生成今日计划…", "action");
-    const result = await generateTodayPlan(subjects, nodes);
-    if (result.ok && result.tasks.length > 0) {
-      const tasks: Task[] = result.tasks.map((t) => ({
-        id: makeId("t"),
-        title: t.title,
-        subject: t.subject,
-        core: t.core,
-        branch: t.knowledge,
-        round: t.round,
-        layer: t.layer,
-        source: "AI 正式（DeepSeek）",
-        range: "今日重点",
-        minutes: t.minutes,
-        standard: "完成对应练习并能在无提示下讲清核心条件",
-        reason: t.reason,
-        backup: "",
-        done: false, actualMinutes: "", difficulty: "2", mastery: "有些模糊", accuracy: "", needReview: true, mood: "正常", note: "", status: "待开始",
-        aiRecommended: true,
-        aiReasonForgetRate: t.priority === 1 ? "今日最高优先级" : "",
-        aiReasonLayerStable: "",
-        aiReasonMistakeCount: "",
-        aiReasonExamFrequency: "",
-        startedAt: "", estimatedCompletionMinutes: t.minutes,
-        masteryBefore: 0, masteryAfter: 0, completedAt: "",
-        relatedCardIds: [], relatedQuestionIds: [],
-      }));
-      setTasks(tasks);
-      pushAssistant(`今日计划（AI 正式 · DeepSeek）：${result.summary}\n${result.tasks.map((t) => `· ${t.title}（${t.minutes} 分钟）— ${t.reason}`).join("\n")}`);
-    } else {
-      generatePlan("AI 指令：今天学什么");
-      pushAssistant(`演示回复（${planErrorReason(result.error)}，未接真模型）：已按风险知识点生成今日任务。`);
-    }
-  }
-
-  function searchQuestionsFromPrompt(text: string) {
-    const keyword = extractQuestionKeyword(text);
-    const keywordMatched = questions.filter((question) => {
-      const haystack = `${question.year}${question.number}${question.stem}${question.core}${question.branch}${question.knowledge}${question.source}`;
-      return !keyword || haystack.includes(keyword);
-    });
-    const fallbackSubject = activeKnowledgeSubject || currentSubject?.name || subjects[0]?.name || "";
-    const subjectName = keywordMatched[0]?.subject || fallbackSubject;
-    const matched = keywordMatched.filter((question) => question.subject === subjectName);
-    setActiveView("knowledge");
-    setActiveKnowledgeSubject(subjectName);
-    setActiveKnowledgePanel("questions");
-    setQuestionFilter({ subject: subjectName, core: "全部", result: "全部", keyword });
-    if (matched.length > 0) {
-      const summary = matched.slice(0, 3).map((q) => `${q.year} 第 ${q.number} 题：${q.knowledge}`).join("；");
-      pushAssistant(`已检索真题库，找到 ${matched.length} 道相关真题：${summary}`);
-    } else {
-      pushAssistant(`已检索 ${subjectName} 真题库，暂未找到「${keyword || text}」相关题目。`);
-    }
-  }
-
-  function runPrompt(prompt = chatInput) {
-    const text = prompt.trim();
-    if (!text) return;
-    // UX Sprint P0: 用户消息写入当前 Session（无 Session 时自动创建；发送即标记为「正在学习」）
-    const sessionId = ensureChatSession();
-    setChatSessions((items) => {
-      const userMessage = createMessage("user", text);
-      return appendMessage(items, sessionId, userMessage).map((s) => s.id === sessionId
-        ? { ...s, title: s.title === "新对话" ? text.slice(0, 20) : s.title, status: "active" }
-        : s);
-    });
-    setChatInput("");
-    // REVIEW_v6 P2：意图路由抽到 lib/chat.classifyPromptIntent
-    // 「把今天整理成笔记」必命中 notes（笔记分支优先于「今天/学什么」）
-    const intent = classifyPromptIntent(text);
-    switch (intent.type) {
-      case "notes": {
-        setNotes((items) => [{ id: makeId("n"), title: "AI 生成笔记", body: "今日重点：先判断过程类型，再选择熵变公式。", tags: ["AI笔记", "热力学"] }, ...items]);
-        pushAssistant("已生成成长笔记。");
-        return;
       }
-      case "plan": {
-        runPlanGeneration();
-        return;
-      }
-      case "agent-workflow": {
-        runAgentWorkflow(text);
-        return;
-      }
-      case "exam-analysis": {
-        runExamAnalysis(currentSubject?.name ?? "");
-        return;
-      }
-      case "search-questions": {
-        searchQuestionsFromPrompt(text);
-        return;
-      }
-      case "fu-suggest": {
-        const resource = resources.find((item) => item.name.includes("傅献彩"));
-        if (resource) {
-          setActiveResourceId(resource.id);
-          setActiveKnowledgeSubject(resource.subject);
-          setActiveKnowledgePanel("resources"); // Stabilization 1B-4: 真正进入 resources/Reader，而非 landing
-          setReaderPage("132");
-          setActiveView("knowledge");
-          setNotice(`已打开：${resource.name} P132-140`);
-          pushAssistant(`傅献彩《物理化学》第六版 P132-140 已关联到 热力学 / 熵与熵变 / 熵变计算。`);
+      // Stabilization 1B-1: 恢复已保存的复盘（刷新后再打开 ReviewDialog 可见）
+      if (data.review) setReview(data.review);
+      // P4 Phase 1: 恢复复盘历史记录（提交后刷新仍可见）
+      if (data.structuredReviews && Array.isArray(data.structuredReviews)) setStructuredReviews(data.structuredReviews);
+      // UX Sprint: 恢复学习结束草稿（关闭/刷新/切换页面均不丢失，保存并完成后才清空）
+      if (data.studyDraft && data.studyDraft.taskId) setStudyDraft(data.studyDraft);
+      // 恢复正在进行的计时（#7）：运行中的段落按持久化的墙钟起点无缝续计
+      if (data.timer && data.timer.activeTimerTaskId) {
+        setActiveTimerTaskId(data.timer.activeTimerTaskId);
+        setTimerStartTime(data.timer.timerStartTime || "");
+        const accum = Number(data.timer.timerAccumSeconds || 0);
+        const startEpoch = Number(data.timer.timerRunStartEpoch || 0);
+        if (startEpoch > 0) {
+          runTimerFrom(accum, startEpoch);
         } else {
-          pushAssistant("未找到傅献彩相关资源。");
+          setTimerAccumSeconds(accum);
+          setElapsedSeconds(accum);
         }
-        return;
       }
-      case "mistake-analysis": {
-        runMistakeAnalysis(currentSubject?.name ?? "");
-        return;
-      }
-      case "review-cards": {
-        setActiveView("cards");
-        setCardSubjectView(activeCardSubject || currentSubject?.name || subjects[0]?.name || "");
-        setActiveCardCategory(ALL_GROUPS);
-        setCardSubView("待复习");
-        pushAssistant(`已进入 ${activeCardSubject || currentSubject?.name || "当前科目"} 的成长卡片复习。`);
-        return;
-      }
-      case "create-card": {
-        createCardFromText("AI对话", text);
-        setActiveView("cards");
-        setCardSubjectView(activeCardSubject || currentSubject?.name || "");
-        setActiveCardCategory(ALL_GROUPS);
-        setCardSubView("待复习");
-        return;
-      }
-      case "round-info": {
-        pushAssistant(`当前主要科目处于 ${currentSubject?.round ?? "第一轮"}，${currentSubject?.layer ?? "第 1 层"}。`);
-        return;
-      }
-      default:
-        pushAssistant("已收到。可以继续让我安排任务、检索真题、生成笔记或调整图谱。");
-        return;
+    } catch (err) {
+      // hydrateWorkspace 已在内部备份损坏原始串；此处仅记录，不清除任何 key
+      console.error("[Storage] hydrate 失败", err);
+    } finally {
+      requestAnimationFrame(() => requestAnimationFrame(() => setAppReady(true)));
     }
-  }
-
-  function addLog(input: string, output: string, accepted = "自动生成", dataRead = ["考试日期", "科目状态", "学习历史", "高风险节点"]) {
-    setLogs((items) => [{ id: makeId("l"), time: today(), input, output, accepted, dataRead, userRevision: "待记录", finalResult: output, rating: "未评价", rework: "0" }, ...items]);
-  }
-
-  function recordStudyDay(minutes = 0, completedDelta = 0) {
-    const date = dateOnly();
-    setStudyDays((items) => {
-      const exists = items.some((item) => item.date === date);
-      const next = exists
-        ? items.map((item) => item.date === date ? { ...item, completed: Math.max(0, item.completed + completedDelta), minutes: Math.max(0, item.minutes + minutes) } : item)
-        : [...items, { date, completed: Math.max(0, completedDelta), minutes: Math.max(0, minutes) }];
-      return next.slice(-MAX_STUDY_DAYS);
-    });
-  }
+    // 仅在挂载时从 localStorage 恢复一次；runTimerFrom 为稳定语义，无需列入依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const workspaceCtx: WorkspaceCtx = {
-    coreNames, UNCATEGORIZED, ALL_GROUPS,
+    coreNames: effectiveCoreNames, UNCATEGORIZED, ALL_GROUPS,
     subjects, activeCardSubject, cardSubjectView, activeCategoryName, activeCardCategory,
     categories, subjectCategories, subjectCards, dueCards, categoryStats, uncategorizedCardCount,
     newCardDeckOpen, newCardDeckName, cardFilter, cardGroupBy, cardMode,
@@ -1676,12 +600,12 @@ export default function Home() {
     activeView, activeKnowledgePanel, activeKnowledgeSubject, resourceView, readingMode,
     readerPage, readerSearch, readerZoom, examAnalyzing, elapsedSeconds, fileUploadState,
     questionFilter, pending, filteredQuestions, relatedQuestions,
-    subjectResources, subjectQuestions, subjectNodes, subjectAnnotations,
+    resources, materials, materialSections, subjectResources, subjectQuestions, subjectNodes, subjectAnnotations,
     setActiveView, setActiveKnowledgePanel, setActiveKnowledgeSubject, setResourceView, setReadingMode,
     setReaderPage, setReaderSearch, setReaderZoom, setResources, setQuestions, setQuestionFilter,
     setNodes, setLearningEvents,
     selectKnowledgeSubject, inferResource, openResource, openResourceDialog, closeResourceDialog,
-    startUploadProgress, addResource, deleteResource, analyzeMaterial,
+    startUploadProgress, startBatchUpload, addResource, deleteResource, analyzeMaterial,
     confirmPendingItem, dismissPendingItem, deleteQuestion, deleteNode, createCardFromText,
     onCreateAnnotation, onEditAnnotation, onDeleteAnnotation,
     // Dashboard tasks
@@ -1751,11 +675,8 @@ export default function Home() {
             activeReviewSubject={activeReviewSubject} setActiveReviewSubject={setActiveReviewSubject}
             reviewSubjects={reviewSubjects}
             reviewMinutes={reviewMinutes} reviewTasks={tasks}
-            reviewCompletedTasks={reviewCompletedTasks} reviewNewNodes={reviewNewNodes}
-            reviewQuestions={questions} reviewDoneQuestions={reviewDoneQuestions}
-            reviewCards={cards} reviewReviewedCards={reviewReviewedCards}
+            reviewCompletedTasks={reviewCompletedTasks}
             reviewMasteryDelta={reviewMasteryDelta} reviewAiSummary={reviewAiSummary}
-            notes={notes}
             structuredReviews={structuredReviews}
             onOpenReviewDialog={() => setActiveDialog("review")}
           />
@@ -1764,11 +685,14 @@ export default function Home() {
         {/* ─── Knowledge Center ─── */}
         {activeView === "knowledge" && <KnowledgeView />}
 
-        {/* ─── Growth Cards 卡片中心（卡片组作为一级工作空间：成长卡片 → 卡片组 → 卡片）─── */}
+        {/* ─── Growth Cards 卡片中心（卡片组作为一级工作空间：沉淀卡片 → 卡片组 → 卡片）─── */}
         {activeView === "cards" && <CardsView />}
 
         {/* Settings Panel */}
         {activeView === "settings" && <SettingsView />}
+
+        {/* ─── 全局上传资料弹窗（任意视图可用，不跳转；知识中心内仍用其内置的真题专用弹窗） ─── */}
+        {activeDialog === "resource" && activeView !== "knowledge" && <GlobalResourceUploadModal />}
 
         {/* ─── Completion Modal (Task result dialog) ─── */}
         {activeDialog === "task" && activeTask && <TaskCompletionModal />}
@@ -1806,7 +730,7 @@ export default function Home() {
 
       {/* ─── 初始化向导（仅客户端挂载后判定；新用户无存档时显示，SSR 不渲染）─── */}
       {bootChecked && !onboardingCompleted && (
-        <OnboardingWizard onComplete={completeOnboarding} onLoadDemo={loadDemoProject} />
+        <OnboardingWizard onComplete={completeOnboarding} />
       )}
     </main>
     </WorkspaceProvider>

@@ -4,7 +4,7 @@ import type { ChatSession } from "../lib/types";
 import { saveUiState } from "../lib/storage";
 import { formatMessageTime } from "../lib/utils";
 import styles from "../../styles/components.module.css";
-import { MESSAGE_TYPE_LABELS, SESSION_STATUS_ICONS, groupSessions, MessageBubble } from "./chat-panel-parts";
+import { MESSAGE_TYPE_LABELS, SESSION_STATUS_ICONS, SESSION_STATUS_DOT, groupSessions, MessageBubble } from "./chat-panel-parts";
 
 /**
  * AI 学习助手（Conversation UX v2）
@@ -282,13 +282,16 @@ export function ChatPanel({
 
   return (
     // P0 修复：必须用固定 height（而非 minHeight），否则历史会话/聊天变长会把整个页面撑高出现整页滚动条
+    // 2026-08-05 极简重构：去掉嵌套卡片感（外层 workspace-pane 即唯一面板），
+    // 顶部操作栏 / 聊天区 / 历史会话直接平铺，不再层层套 border + 圆角灰底卡片
     <section className={`flex flex-col overflow-hidden ${styles.chatPanelHeight}`} id="ai-chat-panel">
-      {/* ─── 顶部操作栏（上下文跟随消息内联显示，不再常驻顶部） ─── */}
-      <div className="flex items-center gap-3 px-4 py-3 mb-0 rounded-t-[10px] border border-b-0 border-[#E4E4E7] bg-white shrink-0">
+      {/* ─── 顶部操作栏（极简扁平：无边框无背景，直接一行） ─── */}
+      <div className="flex items-center gap-3 px-1 py-3 shrink-0">
         <div className="flex-1" />
         <div className="flex items-center gap-2 shrink-0">
           {activeSession?.status && (
-            <span className="text-[12px]" title={`${SESSION_STATUS_ICONS[activeSession.status]} ${activeSession.status === "active" ? "正在学习" : activeSession.status === "completed" ? "已完成" : "暂停"}`}>
+            <span className="inline-flex items-center gap-1 text-[11px] text-[#71717A]">
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${SESSION_STATUS_DOT[activeSession.status]}`} />
               {SESSION_STATUS_ICONS[activeSession.status]}
             </span>
           )}
@@ -306,12 +309,13 @@ export function ChatPanel({
         >
           历史会话
         </button>
+        <span className="h-5 w-px bg-[#E4E4E7] shrink-0" />
       </div>
 
-      {/* ─── 主内容区：聊天 75% + 历史 25%（页面高度固定，各自独立滚动） ─── */}
-      <div className="flex-1 flex gap-3 min-h-0 p-3 bg-[#F4F4F5] rounded-b-[10px]">
+      {/* ─── 主内容区：聊天 75% + 历史 25%（直接平铺在面板内，无嵌套卡片） ─── */}
+      <div className="flex-1 flex gap-3 min-h-0 border-t border-[#F1F1F3]">
         {/* 聊天区（flex-1：聊天记录唯一滚动区域；输入框固定在底部） */}
-        <div className="flex-1 flex flex-col min-w-0 rounded-[10px] border border-[#E4E4E7] bg-[#FBFBFC] overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 thin-scrollbar" data-testid="chat-scroll">
             {conversationMessages.length === 0 ? (
               <div className="py-12 text-center px-6">
@@ -334,7 +338,6 @@ export function ChatPanel({
                     </button>
                   ))}
                 </div>
-                <p className="text-[11px] text-[#A1A1AA] mt-4">提示：发送第一条消息后快捷问题自动隐藏</p>
               </div>
             ) : (
               conversationMessages.map((message, index) => (
@@ -345,8 +348,11 @@ export function ChatPanel({
 
           {systemMessages.length > 0 && (
             <details className="px-3 pb-1" open={systemOpen} onToggle={(e) => setSystemOpen((e.target as HTMLDetailsElement).open)}>
-              <summary className="text-[11px] text-[#A1A1AA] cursor-pointer select-none">
-                系统记录（{systemMessages.length}）
+              <summary className="text-[11px] text-[#A1A1AA] cursor-pointer select-none inline-flex items-center gap-1.5">
+                <span>系统记录（{systemMessages.length}）</span>
+                {!systemOpen && systemMessages.length > 0 && (
+                  <span className="inline-block w-[6px] h-[6px] rounded-full bg-[#EF4444]" aria-label={`${systemMessages.length} 条系统记录`} />
+                )}
               </summary>
               <div className="mt-1 max-h-[100px] overflow-y-auto rounded-[8px] bg-[#FAFAFA] p-2 thin-scrollbar">
                 {systemMessages.map((m) => (
@@ -401,7 +407,6 @@ export function ChatPanel({
             {/* 固定区域：标题 */}
             <div className="px-3 py-2.5 border-b border-[#E4E4E7] bg-[#FAFAFA] shrink-0">
               <div className="text-[13px] font-bold text-[#52525B]">历史会话</div>
-              <div className="text-[10px] text-[#A1A1AA] mt-1">回看「昨天我是怎么学习的」</div>
             </div>
             {/* 可滚动区域：会话列表（细滚动条，底部预留 padding） */}
             <div
@@ -477,7 +482,12 @@ export function ChatPanel({
                         >
                           <div className="flex items-center gap-1.5 min-w-0 mt-2">
                             {isPinned && <span className="text-[11px] shrink-0 opacity-60">📍</span>}
-                            {s.status && <span className="text-[10px] shrink-0">{SESSION_STATUS_ICONS[s.status]}</span>}
+                            {s.status && (
+                              <span className="inline-flex items-center gap-1 shrink-0">
+                                <span className={`inline-block w-1.5 h-1.5 rounded-full ${SESSION_STATUS_DOT[s.status]}`} />
+                                <span className="text-[10px] leading-none">{SESSION_STATUS_ICONS[s.status]}</span>
+                              </span>
+                            )}
                             <span className={`text-[13px] font-bold truncate ${isActive ? "text-white" : "text-[#18181B]"}`}>{s.title}</span>
                           </div>
                           <span className={`block text-[11px] mt-0.5 ${isActive ? "text-white/60" : "text-[#A1A1AA]"}`}>
@@ -520,35 +530,6 @@ export function ChatPanel({
 
       {/* Portal 菜单：fixed 定位到 body，不被历史会话容器裁切；层级高于列表 */}
       {portableMenu}
-
-      {/* 全局样式：细滚动条 + 消息动画 */}
-      <style>{`
-        .message-fade-in {
-          animation: messageFadeIn 0.25s ease-out;
-        }
-        @keyframes messageFadeIn {
-          from { opacity: 0; transform: translateY(6px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .thin-scrollbar {
-          scrollbar-width: thin;
-          scrollbar-color: #D4D4D8 transparent;
-        }
-        .thin-scrollbar::-webkit-scrollbar {
-          width: 5px;
-          height: 5px;
-        }
-        .thin-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .thin-scrollbar::-webkit-scrollbar-thumb {
-          background: #D4D4D8;
-          border-radius: 999px;
-        }
-        .thin-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #A1A1AA;
-        }
-      `}</style>
     </section>
   );
 }

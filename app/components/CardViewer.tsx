@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import type { GrowthCard } from "../lib/types";
 import styles from "../../styles/components.module.css";
+import { LatexContent } from "./LatexContent";
 
 interface CardViewerProps {
   activeCard: GrowthCard;
@@ -39,13 +40,13 @@ export function CardViewer({
               <span className="tag-badge subtle ml-1">{activeCard.core}</span>
             </div>
             <p className="text-[16px] leading-relaxed w-full text-center">
-              {cardMode === "填空" ? activeCard.front.replace(/熵变公式|公式|条件/g, "______") : activeCard.front}
+              <LatexContent text={cardMode === "填空" ? activeCard.front.replace(/公式|定义|特征/g, "______") : activeCard.front} />
             </p>
             <div className="text-[12px] text-[#71717A] mt-4">点击或按 Space 翻面</div>
           </div>
           <div className="back">
             <div className="study-card-head mb-2 w-full"><strong className="text-[16px]">{activeCard.title}</strong></div>
-            <p className="text-[16px] leading-relaxed w-full text-center">{activeCard.back}</p>
+            <p className="text-[16px] leading-relaxed w-full text-center"><LatexContent text={activeCard.back} /></p>
             <div className="flex flex-wrap gap-1 mt-4 justify-center">
               {activeCard.note && <span className="tag-badge amber">{activeCard.note}</span>}
               <span className="tag-badge subtle">来源：{activeCard.source}</span>
@@ -68,9 +69,9 @@ export function CardViewer({
         <button className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={() => onMove(-1)} disabled={cardIndex === 0}>上一张</button>
         <button className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={onFlip}>{cardFlipped ? "看正面" : "翻面"}</button>
         <button className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={() => onMove(1)} disabled={cardIndex >= cardQueue.length - 1}>下一张</button>
-        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#4CAF74] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "认识")}>认识 [1]</button>
-        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#C89B4A] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "模糊")}>模糊 [2]</button>
-        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#B5655D] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "不会")}>不会 [3]</button>
+        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#18181B] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "认识")}>认识 [1]</button>
+        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#52525B] text-white font-bold text-[13px]" onClick={() => onReview(activeCard.id, "模糊")}>模糊 [2]</button>
+        <button className="min-h-[32px] px-3 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={() => onReview(activeCard.id, "不会")}>不会 [3]</button>
         <button className="min-h-[32px] px-3 rounded-[8px] bg-[#18181B] text-white font-bold text-[13px]" onClick={onFocusMode}>专注学习</button>
         <details className="more-menu">
           <summary className="text-[12px]">更多</summary>
@@ -114,18 +115,18 @@ export function FocusMode({ activeCard, cardFlipped, onFlip, onReview, onClose }
           <div className="flipper">
             <div className="front">
               <div className="text-[14px] font-bold text-[#52525B] mb-3">{activeCard.subject} / {activeCard.core}</div>
-              <p className="text-[20px] leading-relaxed">{activeCard.front}</p>
+              <p className="text-[20px] leading-relaxed"><LatexContent text={activeCard.front} /></p>
             </div>
             <div className="back">
               <div className="text-[14px] font-bold text-[#52525B] mb-3">答案</div>
-              <p className="text-[18px] leading-relaxed">{activeCard.back}</p>
+              <p className="text-[18px] leading-relaxed"><LatexContent text={activeCard.back} /></p>
             </div>
           </div>
         </div>
         <div className="flex justify-center gap-3 mt-4">
-          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#4CAF74] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "认识"); onClose(); }}>认识 [1]</button>
-          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#C89B4A] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "模糊"); onClose(); }}>模糊 [2]</button>
-          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#B5655D] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "不会"); onClose(); }}>不会 [3]</button>
+          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#18181B] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "认识"); onClose(); }}>认识 [1]</button>
+          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#52525B] text-white font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "模糊"); onClose(); }}>模糊 [2]</button>
+          <button className="min-h-[36px] px-4 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={() => { onReview(activeCard.id, "不会"); onClose(); }}>不会 [3]</button>
           <button className="min-h-[36px] px-4 rounded-[8px] bg-[#F4F4F5] text-[#18181B] font-bold text-[13px]" onClick={onClose}>退出</button>
         </div>
       </div>

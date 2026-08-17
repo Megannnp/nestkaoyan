@@ -59,16 +59,27 @@ test("classifyPromptIntent：笔记分支优先于「今天」（关键回归）
   assert.deepEqual(classifyPromptIntent("总结今天所学"), { type: "notes" });
 });
 
-test("classifyPromptIntent：11 个意图全覆盖", () => {
+test("classifyPromptIntent：10 个意图全覆盖", () => {
   assert.deepEqual(classifyPromptIntent("今天学什么"), { type: "plan" });
   assert.deepEqual(classifyPromptIntent("帮我安排今天的计划"), { type: "plan" });
   assert.deepEqual(classifyPromptIntent("分析最近三套真题，更新图谱并重排计划"), { type: "agent-workflow" });
   assert.deepEqual(classifyPromptIntent("分析这套真题"), { type: "exam-analysis" });
-  assert.deepEqual(classifyPromptIntent("找近五年化学势真题"), { type: "search-questions" });
-  assert.deepEqual(classifyPromptIntent("傅献彩哪里讲这个"), { type: "fu-suggest" });
+  assert.deepEqual(classifyPromptIntent("找近三年政治真题"), { type: "search-questions" });
   assert.deepEqual(classifyPromptIntent("为什么总错这类题"), { type: "mistake-analysis" });
   assert.deepEqual(classifyPromptIntent("开始复习"), { type: "review-cards" });
   assert.deepEqual(classifyPromptIntent("生成一张公式卡"), { type: "create-card" });
   assert.deepEqual(classifyPromptIntent("我现在属于第几轮"), { type: "round-info" });
   assert.deepEqual(classifyPromptIntent("随便聊聊"), { type: "fallback" });
+});
+
+test("classifyPromptIntent：错因分析匹配收紧——口语含「错/不会」不再误触发", () => {
+  assert.deepEqual(classifyPromptIntent("没错，你说得对"), { type: "fallback" }, "「没错」不应触发错因分析");
+  assert.deepEqual(classifyPromptIntent("不会吧"), { type: "fallback" }, "「不会吧」不应触发错因分析");
+  assert.deepEqual(classifyPromptIntent("搞错了吧"), { type: "fallback" }, "「搞错了」不应触发错因分析");
+  assert.deepEqual(classifyPromptIntent("我说错了吗"), { type: "fallback" }, "「说错了」不应触发错因分析");
+  // 明确的错因意图仍应命中
+  assert.deepEqual(classifyPromptIntent("这道题做错了，帮我分析错因"), { type: "mistake-analysis" });
+  assert.deepEqual(classifyPromptIntent("为什么总错这类题"), { type: "mistake-analysis" });
+  assert.deepEqual(classifyPromptIntent("这题不会做"), { type: "mistake-analysis" });
+  assert.deepEqual(classifyPromptIntent("错题分析"), { type: "mistake-analysis" });
 });

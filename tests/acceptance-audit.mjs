@@ -493,13 +493,13 @@ async function main() {
   // ═══════════════════════════════════════════════════════════
   // 8. Cards：复习/管理/新建 + 评分 + 刷新
   // ═══════════════════════════════════════════════════════════
-  await page.locator("aside button", { hasText: "成长卡片" }).click();
+  await page.locator("aside button", { hasText: "沉淀卡片" }).click();
   await page.waitForTimeout(400);
   const cardTabs = await page.locator(".section-heading button", { hasText: /复习|管理|新建卡片/ }).count().catch(() => 0);
   const cardViewer = await page.locator("[class*=flip-container], .flip-container").count().catch(() => 0);
   rec("Cards-复习Tab+CardViewer", {
-    entry: "成长卡片 Tab",
-    steps: ["进入成长卡片"],
+    entry: "沉淀卡片 Tab",
+    steps: ["进入沉淀卡片"],
     expected: "复习/管理/新建卡片 Tab；CardViewer 渲染",
     actual: `Tab按钮=${cardTabs}；CardViewer 翻牌容器=${cardViewer}`,
     status: cardTabs >= 3 && cardViewer > 0 ? "PASS" : "BROKEN",
@@ -550,7 +550,7 @@ async function main() {
   const manageMetrics = await page.locator(".metric-grid").count().catch(() => 0);
   const cardGrid = await page.locator(".card-grid .study-card").count().catch(() => 0);
   rec("Cards-管理Tab", {
-    entry: "成长卡片 管理 Tab",
+    entry: "沉淀卡片 管理 Tab",
     steps: ["切管理 Tab"],
     expected: "指标卡 + 卡片网格",
     actual: `指标=${manageMetrics}；卡片=${cardGrid}`,

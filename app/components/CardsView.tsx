@@ -6,7 +6,7 @@ import { makeId, today, dateOnly } from "../lib/utils";
 import type { GrowthCard } from "../lib/types";
 
 /**
- * 成长卡片视图（从 page.tsx 抽出，行为等价）。
+ * 沉淀卡片视图（从 page.tsx 抽出，行为等价）。
  * 数据/回调经 useWorkspace() 取用，不改动任何交互逻辑。
  */
 export function CardsView() {
@@ -14,23 +14,23 @@ export function CardsView() {
     coreNames, UNCATEGORIZED, ALL_GROUPS,
     subjects, activeCardSubject, cardSubjectView, activeCategoryName, activeCardCategory,
     categories, subjectCategories, subjectCards, dueCards, categoryStats, uncategorizedCardCount,
-    newCardDeckOpen, newCardDeckName, cardFilter, cardGroupBy, cardMode,
+    newCardDeckOpen, newCardDeckName, cardMode,
     categoryReviewQueue, activeGroupCard, categoryClampedCardIndex, cardFlipped, focusMode,
-    visibleCategoryCards, hydratedTodayStr, activeDialog, editingCard,
+    activeDialog, editingCard,
     renamingCardId, renamingCardName, deletingCardId,
     cardDialogCategory, cardDialogSubject, cardDialogSubjectCategories, nodes, activeResource, currentSubject,
     setActiveCardSubject, setCardSubjectView, setActiveCardCategory, setCardIndex, setCardFlipped,
     setCardSubView, setRenamingCardId, setRenamingCardName, setCardMenuOpenId, setDeletingCardId,
-    setNewCardDeckOpen, setNewCardDeckName, setCardFilter, setCardGroupBy, setCardMode, setFocusMode,
+    setNewCardDeckOpen, setNewCardDeckName, setCardMode, setFocusMode,
     setCards, setCategories, setNotice, setEditingCardId, setActiveDialog, setCardDialogCategory, setCardDialogSubject,
     openNewCardDialog, addCategoryInline, moveCard, reviewCard, openCardSource, showRelatedQuestions,
-    moveCardToCategory, openEditCardDialog, deleteCard, pushAssistant,
+    pushAssistant,
   } = useWorkspace();
 
   return (
           <section className="knowledge workspace-pane active" id="cards">
             <div className="section-heading">
-              <div><div className="section-label">Growth Cards</div><h2>{cardSubjectView ? activeCategoryName : "成长卡片"}</h2></div>
+              <div><div className="section-label">Growth Cards</div><h2>{cardSubjectView ? activeCategoryName : "沉淀卡片"}</h2></div>
               {/* 黑白灰统一按钮风格：Primary 黑底白字（开始复习）；Secondary 白底浅灰边框黑字（返回/新建/管理） */}
               <div className="flex items-center gap-3 shrink-0 flex-wrap">
                 {cardSubjectView ? (
@@ -68,7 +68,7 @@ export function CardsView() {
                     {/* 新建卡片组 — Secondary（中权重） */}
                     <button
                       className="min-h-[32px] px-3 rounded-[8px] bg-white border border-[#D4D4D8] text-[#18181B] font-bold text-[13px] hover:bg-[#F4F4F5] transition-colors"
-                      onClick={() => { document.getElementById("new-card-deck-form")?.scrollIntoView({ behavior: "smooth" }); (document.getElementById("new-card-deck-input") as HTMLInputElement | null)?.focus(); }}
+                      onClick={() => { setNewCardDeckOpen(true); setCardMenuOpenId(null); requestAnimationFrame(() => { document.getElementById("new-card-deck-form")?.scrollIntoView({ behavior: "smooth" }); (document.getElementById("new-card-deck-input") as HTMLInputElement | null)?.focus(); }); }}
                     >新建卡片组</button>
                     {/* 开始复习 — Primary（最高权重，放最右） */}
                     <button
@@ -80,7 +80,7 @@ export function CardsView() {
               </div>
             </div>
 
-            {/* 成长卡片首页：仅管理/展示该学科的卡片组（点击卡片组进入学习空间） */}
+            {/* 沉淀卡片首页：仅管理/展示该学科的卡片组（点击卡片组进入学习空间） */}
             {!cardSubjectView && (
               <>
                 <div className="flex flex-wrap gap-2 mb-4">
@@ -171,7 +171,7 @@ export function CardsView() {
                     <span className="text-[13px] text-[#71717A]">{uncategorizedCardCount} 张卡片</span>
                   </div>
                   {/* 新建卡片组（样式与知识中心入口一致，但允许新建；点击展开输入框，创建后自动收起） */}
-                  <div className="p-6 rounded-[12px] border-2 border-dashed border-[#D4D4D8] bg-[#FAFAFA]">
+                  <div id="new-card-deck-form" className="p-6 rounded-[12px] border-2 border-dashed border-[#D4D4D8] bg-[#FAFAFA]">
                     {!newCardDeckOpen ? (
                       <button
                         className="w-full text-left text-[#71717A] hover:text-[#18181B] transition-colors"
@@ -185,6 +185,7 @@ export function CardsView() {
                       <div className="flex flex-col gap-2">
                         <strong className="text-[14px] text-[#18181B]">卡片组名称</strong>
                         <input
+                          id="new-card-deck-input"
                           autoFocus
                           value={newCardDeckName}
                           onChange={(e) => setNewCardDeckName(e.target.value)}
@@ -230,34 +231,6 @@ export function CardsView() {
                   ))}
                 </div>
 
-                {/* ─── 信息架构（2026-08-01）：状态筛选 × 分组方式 两个独立维度 ─── */}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-bold text-[#A1A1AA] mr-0.5">状态</span>
-                    {(["待复习", "全部", "收藏"] as const).map((view) => (
-                      <button
-                        key={view}
-                        className={`min-h-[28px] px-3 rounded-[8px] font-bold text-[12px] ${cardFilter === view ? "bg-[#18181B] text-white" : "bg-[#F4F4F5] text-[#18181B]"}`}
-                        onClick={() => setCardFilter(view)}
-                      >
-                        {view}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-bold text-[#A1A1AA] mr-0.5">分组</span>
-                    {(["按七核", "按掌握度", "按时间"] as const).map((g) => (
-                      <button
-                        key={g}
-                        className={`min-h-[28px] px-3 rounded-[8px] font-bold text-[12px] ${cardGroupBy === g ? "bg-[#18181B] text-white" : "bg-[#F4F4F5] text-[#18181B]"}`}
-                        onClick={() => setCardGroupBy(g)}
-                      >
-                        {g}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 {/* 多模式学习（PRD 3.4）：背诵 / 填空 / 推导 / 条件辨析 */}
                 <div className="flex items-center gap-1.5 mb-3">
                   <span className="text-[11px] font-bold text-[#A1A1AA] mr-0.5">模式</span>
@@ -272,122 +245,21 @@ export function CardsView() {
                   ))}
                 </div>
 
-                {/* 待复习（状态=待复习）→ 卡片复习器（仅当前卡片组范围） */}
-                {cardFilter === "待复习" && (
-                  categoryReviewQueue.length > 0 ? (
-                    <CardViewer
-                      activeCard={activeGroupCard}
-                      cardIndex={categoryClampedCardIndex} cardQueue={categoryReviewQueue}
-                      cardFlipped={cardFlipped} cardMode={cardMode}
-                      onFlip={() => setCardFlipped(!cardFlipped)}
-                      onMove={moveCard}
-                      onReview={reviewCard}
-                      onFocusMode={() => setFocusMode(!focusMode)}
-                      onOpenSource={openCardSource}
-                      onShowRelated={showRelatedQuestions}
-                    />
-                  ) : (
-                    <p className="empty-state">该卡片组暂无待复习卡片</p>
-                  )
-                )}
-
-                {/* 分组=按七核（默认）：按 core 分组统计当前筛选卡片 */}
-                {cardGroupBy === "按七核" && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {coreNames.map((core) => {
-                      const coreCards = visibleCategoryCards.filter((card) => card.core === core);
-                      if (coreCards.length === 0) return null;
-                      return (
-                        <article key={core} className="p-3 rounded-[8px] border border-[#E4E4E7] bg-white">
-                          <strong className="text-[13px] block mb-2">{core}</strong>
-                          <span className="text-[12px] text-[#71717A]">{coreCards.length} 张卡片</span>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* 分组=按掌握度：按 mastery 分组统计当前筛选卡片 */}
-                {cardGroupBy === "按掌握度" && (
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    {(["不会", "模糊", "认识", "熟练"] as const).map((mastery) => {
-                      const masteryCards = visibleCategoryCards.filter((card) => card.mastery === mastery);
-                      if (masteryCards.length === 0) return null;
-                      return (
-                        <article key={mastery} className="p-3 rounded-[8px] border border-[#E4E4E7] bg-white">
-                          <strong className="text-[13px] block mb-2">{mastery}</strong>
-                          <span className="text-[12px] text-[#71717A]">{masteryCards.length} 张卡片</span>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* 分组=按时间：按复习时间/到期状态统计当前筛选卡片 */}
-                {cardGroupBy === "按时间" && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {[
-                      { label: "未复习", list: visibleCategoryCards.filter((card) => card.lastReviewed === "未复习") },
-                      { label: "到期复习", list: visibleCategoryCards.filter((card) => card.lastReviewed !== "未复习" && (!card.nextReviewAt || card.nextReviewAt <= hydratedTodayStr)) },
-                      { label: "未来复习", list: visibleCategoryCards.filter((card) => card.lastReviewed !== "未复习" && card.nextReviewAt > hydratedTodayStr) },
-                    ].map((group) => (
-                      group.list.length > 0 ? (
-                        <article key={group.label} className="p-3 rounded-[8px] border border-[#E4E4E7] bg-white">
-                          <strong className="text-[13px] block mb-2">{group.label}</strong>
-                          <span className="text-[12px] text-[#71717A]">{group.list.length} 张卡片</span>
-                        </article>
-                      ) : null
-                    ))}
-                    {visibleCategoryCards.length === 0 && <p className="empty-state">当前筛选下暂无卡片。</p>}
-                  </div>
-                )}
-
-                {/* 状态=全部/收藏 → 该卡片组卡片网格（含移动到其他卡片组管理） */}
-                {(cardFilter === "全部" || cardFilter === "收藏") && (
-                  <div className="card-grid">
-                    {visibleCategoryCards.map((card) => (
-                      <article className="study-card" key={card.id}>
-                        <div className="study-card-head">
-                          <strong>{card.title}</strong>
-                          <span>{card.type}</span>
-                        </div>
-                        <p className="text-[13px]">{cardMode === "填空" ? card.front.replace(/熵变公式|公式|条件/g, "______") : card.front}</p>
-                        <details>
-                          <summary>{cardMode === "背诵" ? "查看背面" : "查看参考答案"}</summary>
-                          <p className="text-[13px]">{card.back}</p>
-                        </details>
-                        <div className="subject-meta">
-                          <span>{card.subject}</span><span>{card.core}</span><span>{card.knowledge}</span>
-                        </div>
-                        {/* 移动到其他卡片组（只能移动到当前学科下的卡片组，不能跨学科） */}
-                        {activeCardCategory !== ALL_GROUPS && activeCardCategory !== UNCATEGORIZED && (
-                          <label className="flex items-center gap-1.5 mt-2 text-[12px] text-[#71717A]">
-                            <span className="shrink-0">卡片组</span>
-                            <select
-                              className="min-h-[28px] text-[12px] px-2 rounded border border-[#D4D4D8] bg-white"
-                              value={card.categoryId ?? ""}
-                              onChange={(e) => { moveCardToCategory(card.id, e.target.value); setNotice(`已移动卡片到卡片组`); }}
-                            >
-                              <option value="">未分类</option>
-                              {subjectCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
-                            </select>
-                          </label>
-                        )}
-                        <small className="block text-[12px] text-[#71717A] mt-2">来源：{card.source} {card.page} / {card.lastReviewed} / {card.nextReviewAt}</small>
-                        <div className="card-actions">
-                          <button className="text-button text-[12px]" onClick={() => reviewCard(card.id, "认识")}>认识</button>
-                          <button className="text-button text-[12px]" onClick={() => reviewCard(card.id, "模糊")}>模糊</button>
-                          <button className="text-button text-[12px]" onClick={() => reviewCard(card.id, "不会")}>不会</button>
-                          <button className="text-button text-[12px]" onClick={() => setCards((items) => items.map((item) => item.id === card.id ? { ...item, favorite: !item.favorite } : item))}>{card.favorite ? "★收藏" : "收藏"}</button>
-                          <button className="text-button text-[12px]" onClick={() => openEditCardDialog(card)}>编辑</button>
-                          <button className="text-button text-[12px]" onClick={() => openCardSource(card)}>来源</button>
-                          <button className="text-button text-[12px]" onClick={() => showRelatedQuestions(card.core, card.knowledge, card.subject)}>真题</button>
-                          <button className="text-button text-[12px]" onClick={() => deleteCard(card)}>删除</button>
-                        </div>
-                      </article>
-                    ))}
-                    {visibleCategoryCards.length === 0 && <p className="empty-state">{cardFilter === "收藏" ? "该卡片组暂无收藏卡片。" : "该卡片组暂无卡片。"}</p>}
-                  </div>
+                {/* 卡片复习器（仅当前卡片组范围；默认直接进入复习） */}
+                {categoryReviewQueue.length > 0 ? (
+                  <CardViewer
+                    activeCard={activeGroupCard}
+                    cardIndex={categoryClampedCardIndex} cardQueue={categoryReviewQueue}
+                    cardFlipped={cardFlipped} cardMode={cardMode}
+                    onFlip={() => setCardFlipped(!cardFlipped)}
+                    onMove={moveCard}
+                    onReview={reviewCard}
+                    onFocusMode={() => setFocusMode(!focusMode)}
+                    onOpenSource={openCardSource}
+                    onShowRelated={showRelatedQuestions}
+                  />
+                ) : (
+                  <p className="empty-state">该卡片组暂无待复习卡片</p>
                 )}
               </>
             )}
@@ -485,8 +357,8 @@ export function CardsView() {
             {/* 新建 / 编辑卡片弹窗（编辑时预填并更新；新建时自动继承上下文 + 更多设置折叠） */}
             {activeDialog === "card" && (
               <div className="modal-backdrop" role="presentation" onClick={() => { setEditingCardId(null); setActiveDialog(null); }}>
-                <section className="modal-panel" role="dialog" aria-modal="true" aria-label={editingCard ? "编辑成长卡片" : "新建成长卡片"} onClick={(event) => event.stopPropagation()}>
-                  <div className="modal-head"><div><span>成长卡片</span><strong>{editingCard ? "编辑成长卡片" : "新建成长卡片"}</strong></div><button onClick={() => { setEditingCardId(null); setActiveDialog(null); }}>关闭</button></div>
+                <section className="modal-panel" role="dialog" aria-modal="true" aria-label={editingCard ? "编辑沉淀卡片" : "新建沉淀卡片"} onClick={(event) => event.stopPropagation()}>
+                  <div className="modal-head"><div><span>沉淀卡片</span><strong>{editingCard ? "编辑沉淀卡片" : "新建沉淀卡片"}</strong></div><button onClick={() => { setEditingCardId(null); setActiveDialog(null); }}>关闭</button></div>
                   <form className="form-grid" key={editingCard?.id ?? "new"} onSubmit={(event) => {
                     event.preventDefault();
                     const form = new FormData(event.currentTarget);
@@ -569,7 +441,7 @@ export function CardsView() {
                         <label className="field"><span>页码</span><input name="page" defaultValue={editingCard?.page ?? ""} placeholder={activeResource?.currentPage || ""} /></label>
                       </div>
                     </details>
-                    <button>{editingCard ? "保存修改" : "创建成长卡片"}</button>
+                    <button>{editingCard ? "保存修改" : "创建沉淀卡片"}</button>
                   </form>
                 </section>
               </div>

@@ -32,7 +32,7 @@ test.describe("Dashboard 今日任务", () => {
   test("更多菜单：提高优先级改变任务顺序", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
-    const titlesBefore = await page.locator(".task-row strong").allTextContents();
+    const titlesBefore = await page.locator(".task-row .task-title-row strong").allTextContents();
     expect(titlesBefore.length).toBeGreaterThan(1);
 
     // 对第二个任务点「提高优先级」→ 与第一个任务交换
@@ -43,7 +43,7 @@ test.describe("Dashboard 今日任务", () => {
     await moreItems.nth(0).click();
     await page.waitForTimeout(200);
 
-    const titlesAfter = await page.locator(".task-row strong").allTextContents();
+    const titlesAfter = await page.locator(".task-row .task-title-row strong").allTextContents();
     expect(titlesAfter[0]).toBe(titlesBefore[1]);
     expect(titlesAfter[1]).toBe(titlesBefore[0]);
 
@@ -111,11 +111,11 @@ test.describe("Dashboard 今日任务", () => {
   test("刷新后任务顺序与状态持久化", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
-    const firstTitleBefore = await page.locator(".task-row").first().locator("strong").first().textContent();
+    const firstTitleBefore = await page.locator(".task-row").first().locator(".task-title-row strong").first().textContent();
 
     await page.reload();
     await expect(page.locator(".task-row").first()).toBeVisible();
-    const firstTitleAfter = await page.locator(".task-row").first().locator("strong").first().textContent();
+    const firstTitleAfter = await page.locator(".task-row").first().locator(".task-title-row strong").first().textContent();
 
     expect(firstTitleAfter).toBe(firstTitleBefore);
 
@@ -123,20 +123,28 @@ test.describe("Dashboard 今日任务", () => {
     expectNoCriticalConsoleIssues(issues, "dashboard-reload");
   });
 
-  test("重新生成今日计划", async ({ page }) => {
+  test("重新生成今日计划（Agent 触发）", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
-    await page.getByRole("button", { name: "重新生成今日计划" }).click();
-    await expect(page.locator(".task-row").first()).toBeVisible();
+    // UI 无「重新生成今日计划」按钮（2026-08-17 确认）；计划生成经 Agent「制定今天学习计划」触发
+    await gotoAgent(page);
+    const input = page.getByTestId("chat-input");
+    await input.fill("制定今天学习计划");
+    await input.press("Enter");
+    // runPlanGeneration：无 API key 时降级本地生成并标注「演示回复」
+    await expect(page.getByText(/今日计划|演示回复/).first()).toBeVisible({ timeout: 10000 });
 
     const issues = collector.getIssues();
     expectNoCriticalConsoleIssues(issues, "dashboard-plan");
   });
 
-  test("首页入口：直接进入我的资料库", async ({ page }) => {
+  test("知识中心入口：进入我的资料库（原任务区跳转按钮已移除，统一走知识中心）", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
-    await page.getByRole("button", { name: "我的资料库" }).click();
+    // 信息架构精简（2026-08-01）：任务区不再内嵌「我的资料库」跳转，统一从 Sidebar 知识中心进入
+    await page.getByRole("button", { name: "知识中心" }).click();
+    await expect(page.getByRole("heading", { name: "知识中心" })).toBeVisible();
+    await page.getByRole("button", { name: "学习资料" }).click();
     await expect(page.getByRole("heading", { name: "我的资料库" })).toBeVisible();
 
     const issues = collector.getIssues();
@@ -146,6 +154,9 @@ test.describe("Dashboard 今日任务", () => {
   test("热力图日期点击进入复盘", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
+    // 信息架构精简（2026-08-01）：热力图默认折叠为一行「学习记录」，先展开再点击日期格子
+    await page.getByRole("button", { name: /学习记录/ }).first().click();
+    await expect(page.getByRole("button", { name: /学习记录 2026-07-30/ })).toBeVisible();
     await page.getByRole("button", { name: /学习记录 2026-07-30/ }).click();
     await expect(page.getByRole("heading", { name: "学习复盘" })).toBeVisible();
 
@@ -233,27 +244,28 @@ test.describe("Agent AI 学习助手（标准聊天界面）", () => {
 
     await gotoAgent(page);
     const input = page.getByTestId("chat-input");
-    await input.fill("找熵变真题");
+    await input.fill("找社会存在真题");
     await input.press("Enter");
 
-    await expect(page.getByRole("heading", { name: "真题数据库" })).toBeVisible();
-    await expect(page.getByText("2025 828 物理化学 第 3 题")).toBeVisible();
-    await expect(page.getByText(/已检索真题库，找到 1 道相关真题/)).toBeVisible();
+    // 检索到真题 → 跳转知识中心真题库（套卷书架视图，展示匹配科目套卷）
+    await expect(page.getByRole("heading", { name: "真题库" })).toBeVisible();
+    await expect(page.locator(".bookshelf-grid .book-card").first()).toBeVisible();
 
     const issues = collector.getIssues();
     expectNoCriticalConsoleIssues(issues, "agent-question-search");
   });
 
-  test("傅献彩跳知识中心 Reader", async ({ page }) => {
+  test("Agent 跳转沉淀卡片复习", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
     await gotoAgent(page);
     const input = page.getByTestId("chat-input");
-    await input.fill("傅献彩哪里讲这个");
+    await input.fill("开始复习");
     await input.press("Enter");
-    await expect(page.getByText("我的资料库")).toBeVisible();
+    // review-cards 意图 → 跳转沉淀卡片「全部卡片」视图（heading 为分类名，非「沉淀卡片」）
+    await expect(page.getByRole("heading", { name: "全部卡片" })).toBeVisible({ timeout: 10000 });
 
     const issues = collector.getIssues();
-    expectNoCriticalConsoleIssues(issues, "agent-knowledge-jump");
+    expectNoCriticalConsoleIssues(issues, "agent-cards-jump");
   });
 });

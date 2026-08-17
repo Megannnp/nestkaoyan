@@ -66,7 +66,7 @@ test("① 模拟 v3+v4 共存现场 → 迁移 → 校验 storageVersion=STORAGE
   assert.ok(result, "迁移后应返回数据");
   assert.equal(result.storageVersion, STORAGE_VERSION, "storageVersion 应为当前版本（STORAGE_VERSION）");
   // 业务基座来自 v3（不被 v4 覆盖）
-  assert.equal(result.exam.examName, "验收测试考试", "exam 应来自 v3 而非 v4");
+  assert.equal(result.exam?.examName, "验收测试考试", "exam 应来自 v3 而非 v4");
   assert.equal(result.subjects?.[0]?.name, "828 物理化学");
   assert.ok(Array.isArray(result.tasks));
   // v4 字段补充
@@ -88,7 +88,7 @@ test("② 回滚演练：删除新 key 后重跑迁移仍成功", () => {
   const second = hydrateWorkspace();
   assert.ok(second, "删除新 key 后重跑迁移应仍成功");
   assert.equal(second.storageVersion, STORAGE_VERSION);
-  assert.equal(second.exam.examName, "验收测试考试", "回滚重建后业务数据一致");
+  assert.equal(second.exam?.examName, "验收测试考试", "回滚重建后业务数据一致");
 });
 
 test("③ 迁移后 v3/v4 原样保留（可回滚）", () => {
@@ -117,7 +117,7 @@ test("④ 已存在 workspace key 时不重复迁移（幂等）", () => {
   store.set(LEGACY_KEY_V3, JSON.stringify(v3sample));
 
   const result = hydrateWorkspace();
-  assert.equal(result?.exam.examName, "直接写入", "应直接使用当前 key,不重复迁移");
+  assert.equal(result?.exam?.examName, "直接写入", "应直接使用当前 key,不重复迁移");
 });
 
 test("⑤ 只读保护：版本高于当前 → 拒绝读取", () => {

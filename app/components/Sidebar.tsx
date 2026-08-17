@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { s } from "../lib/css-utils";
 import type { WorkspaceView, ExamGoal } from "../lib/types";
+import { loadUiState, readLegacyRawValue, saveUiState } from "../lib/storage";
 import styles from "../../styles/components.module.css";
 
 interface SidebarProps {
@@ -36,6 +38,31 @@ export function Sidebar({
   activeView, setActiveView, heatmapRef,
   onCellMouseEnter, onCellMouseLeave, onCellClick,
 }: SidebarProps) {
+  // ─── 信息架构精简（2026-08-01）：热力图默认折叠为一行，展开才显示格子 ───
+  // 避免压缩核心导航（四宫格）的可见性；点击头部区域展开/收起
+  // 2026-08-03 体验优化 #5：折叠状态持久化到 localStorage
+  // 2026-08-04 审查修复：改用 storage.ts 的 saveUiState/loadUiState（闭合「localStorage 直写 = 0」契约）
+  // Hydration-safe：初始固定 false（SSR 与客户端首次渲染一致），
+  // 持久化折叠状态在 mount 后用 useEffect 读取，避免 SSR 阶段访问 localStorage
+  // 导致 hydration mismatch（2026-08-05 实测修复）
+  const [heatmapExpanded, setHeatmapExpanded] = useState(false);
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    try {
+      const stored = loadUiState("heatmap-expanded") as unknown;
+      if (typeof stored === "boolean") { setHeatmapExpanded(stored); return; }
+      // 兼容旧 key（kaoyan-heatmap-expanded 曾直接存 "1"/"0" 非 JSON 字符串）
+      const legacy = readLegacyRawValue("kaoyan-heatmap-expanded");
+      if (legacy !== null) setHeatmapExpanded(legacy === "1");
+    } catch { /* 忽略读取失败，保持默认折叠 */ }
+  }, []);
+  const toggleHeatmap = () => {
+    setHeatmapExpanded((v) => {
+      const next = !v;
+      saveUiState("heatmap-expanded", next);
+      return next;
+    });
+  };
   return (
     <aside className="fixed top-0 left-0 h-screen w-[288px] z-10 hidden lg:flex flex-col bg-white/82 backdrop-blur-[18px] border-r border-[#E4E4E7] px-6 py-4 gap-3 overflow-y-auto overflow-x-hidden">
       {/* Logo + 倒计时 */}
@@ -70,12 +97,25 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* 热力图 */}
+      {/* 热力图（默认折叠，点击展开） */}
       <div className="border-t border-[#E4E4E7] mt-3 pt-3 w-full min-w-0 max-w-full">
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <div className="text-[13px] font-semibold leading-[1.4] text-[#18181B] shrink-0">学习记录</div>
-          <div className="text-[11px] leading-[1.4] text-[#71717A] shrink-0 whitespace-nowrap">开始于 {heatmapStartFormatted}</div>
-        </div>
+        <button
+          type="button"
+          className="w-full flex items-center justify-between gap-2 mb-2 cursor-pointer text-left"
+          onClick={toggleHeatmap}
+          aria-expanded={heatmapExpanded}
+        >
+          <span className="text-[13px] font-semibold leading-[1.4] text-[#18181B] shrink-0">学习记录</span>
+          <span className="text-[11px] leading-[1.4] text-[#71717A] shrink-0 whitespace-nowrap">
+            {heatmapExpanded ? "收起 ▴" : `开始于 ${heatmapStartFormatted} ▾`}
+          </span>
+        </button>
+        {heatmapExpanded && heatmapDays.length === 0 && (
+          <div className="text-[12px] text-[#71717A] py-3 px-1 leading-relaxed">
+            还没有学习记录。完成今天的任务后，这里会显示你的学习轨迹。
+          </div>
+        )}
+        {heatmapExpanded && heatmapDays.length > 0 && (
         <div className={`w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden ${styles.sidebarHeatmapScroller}`} ref={heatmapRef}>
           <div className={`w-max ${styles.sidebarHeatmapInner}`}>
             {/* Month labels */}
@@ -120,6 +160,7 @@ export function Sidebar({
             </div>
           </div>
         </div>
+        )}
         {/* Tooltip */}
         <div style={{
           ...s.tooltipBox, top: tooltipData?.top ?? 0, left: tooltipData?.left ?? 0,
@@ -154,7 +195,7 @@ export function Sidebar({
             { key: "dashboard" as WorkspaceView, label: "今日工作台", icon: "📋" },
             { key: "agent" as WorkspaceView, label: "AI学习助手", icon: "🤖" },
             { key: "knowledge" as WorkspaceView, label: "知识中心", icon: "📚" },
-            { key: "cards" as WorkspaceView, label: "成长卡片", icon: "🗂️" },
+            { key: "cards" as WorkspaceView, label: "沉淀卡片", icon: "🗂️" },
           ].map((item) => {
             const isActive = activeView === item.key;
             return (

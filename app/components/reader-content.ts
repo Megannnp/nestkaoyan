@@ -8,9 +8,9 @@ function generatePageContent(
   pageNum: number
 ): string[] {
   const resourceName = resource.name || "资料";
-  const subject = resource.subject || "物理化学";
+  const subject = resource.subject || "政治";
   const linkedNode = resource.linkedNode || "";
-  const coreName = linkedNode.split("/")[0]?.trim() || "热力学";
+  const coreName = linkedNode.split("/")[0]?.trim() || "核心考点";
   const knowledgeName = linkedNode.split("/")[2]?.trim() || "";
 
   const relatedNodes = nodes.filter(n => n.subject === subject);
@@ -94,6 +94,19 @@ function ensurePdfWorker(pdfjsLib: { GlobalWorkerOptions: { workerSrc?: string }
       // worker 路径不可解析：由错误矩阵 1A-2e 兜底
     }
   }
+}
+
+/**
+ * 2026-08-05 修复：中文 PDF 文本提取必须配置 CMap。
+ * 缺少 cMapUrl 时，使用 CJK 编码（如 UniGB-UCS2-H / UTM-XXX）的 PDF 会提取出乱码或空文本。
+ * build/sites-vite-plugin.ts 已将 node_modules/pdfjs-dist/cmaps/*.bcmap 复制到站点根 /cmaps/，
+ * 因此这里直接使用站点根相对路径，生产部署与本地构建均可解析。
+ */
+const PDF_CMAP_URL = "/cmaps/";
+
+/** 获取 pdfjs getDocument 所需的 CMap 参数（用于文本提取/渲染） */
+export function getPdfCMapOptions(): { cMapUrl: string; cMapPacked: boolean } {
+  return { cMapUrl: PDF_CMAP_URL, cMapPacked: true };
 }
 
 export { generatePageContent, generateAiHint, searchInContent, ensurePdfWorker };

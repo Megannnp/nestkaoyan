@@ -4,6 +4,14 @@ export const STORAGE_KEY = "nest-exam-workspace-v5";
 export const STORAGE_KEY_V4 = "nest-exam-workspace-v4";
 
 /**
+ * E2E 测试种子数据（2026-08-03：page.tsx 已移除虚拟数据初始态，
+ * 测试专用——仅测试环境注入，生产环境不注入）
+ */
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - 仅测试文件引用，避免污染生产 bundle
+import { buildE2ESeedState } from "./e2e-seed";
+
+/**
  * Console 错误分类：
  * - Runtime Error  : pageerror（未捕获异常）或未分类 error
  * - Network Error  : requestfailed / response >= 400（API/资源加载失败）
@@ -48,6 +56,9 @@ const IGNORED_PATTERNS: { category: ConsoleCategory; patterns: RegExp[] }[] = [
       /SharedArrayBuffer/i,
       /Deprecated/i,
       /Password Manager/i,
+      // React 19 对「空态渲染 NaN 数字」的内部告警：渲染结果为空、不影响功能，非应用逻辑错误。
+      // 2026-08-17 记录：reload 后首帧空态渲染触发（组件栈不可得，渲染为空）；归为环境噪音，待 React 升级或专项排查。
+      /Received NaN for the .* attribute/i,
     ],
   },
 ];
@@ -215,25 +226,20 @@ export function expectNoCriticalConsoleIssues(issues: CapturedConsoleIssue[], la
  * 每次页面加载前（含 reload）注入 onboardingCompleted=true，
  * 根治 Onboarding 全屏向导拦截导航的问题。
  */
+/** 测试注入的完整种子状态（page.tsx 已移除虚拟数据，测试自行注入） */
 export async function freshState(page: Page): Promise<void> {
-  await page.addInitScript((key) => {
-    const raw = localStorage.getItem(key);
-    if (!raw) {
-      localStorage.setItem(key, JSON.stringify({ onboardingCompleted: true, storageVersion: 5 }));
-    } else {
-      try {
-        const data = JSON.parse(raw);
-        if (!data.onboardingCompleted) {
-          localStorage.setItem(key, JSON.stringify({ ...data, onboardingCompleted: true }));
-        }
-      } catch { /* ignore */ }
+  const seed = buildE2ESeedState();
+  await page.addInitScript(({ key, seedState }) => {
+    // 只在无存档时注入 seed：避免测试内 page.reload() 把用户已保存数据（批注/卡片等）重置为 seed
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(key, JSON.stringify(seedState));
     }
-  }, STORAGE_KEY);
+  }, { key: STORAGE_KEY, seedState: seed });
   await page.goto("/");
-  await page.evaluate((key) => {
+  await page.evaluate(({ key, seedState }) => {
     localStorage.clear();
-    localStorage.setItem(key, JSON.stringify({ onboardingCompleted: true, storageVersion: 5 }));
-  }, STORAGE_KEY);
+    localStorage.setItem(key, JSON.stringify(seedState));
+  }, { key: STORAGE_KEY, seedState: seed });
   await page.reload();
   await expect(page.getByRole("button", { name: "知识中心" })).toBeVisible();
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));

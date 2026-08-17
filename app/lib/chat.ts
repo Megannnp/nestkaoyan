@@ -68,8 +68,7 @@ export type PromptIntent =
   | { type: "plan" }              // 今天学什么 / 今日计划
   | { type: "agent-workflow" }    // 分析真题 + 更新/重排
   | { type: "exam-analysis" }     // 分析真题
-  | { type: "search-questions" }  // 化学势 / 找真题
-  | { type: "fu-suggest" }        // 傅献彩哪里讲
+  | { type: "search-questions" }  // 找真题
   | { type: "mistake-analysis" }  // 错因分析
   | { type: "review-cards" }      // 复习
   | { type: "create-card" }       // 生成卡片
@@ -79,7 +78,7 @@ export type PromptIntent =
 /**
  * 将用户 Prompt 分类为意图（纯函数，无副作用）。
  * 优先级与 page.tsx runPrompt 完全一致：
- *   笔记 > 今日计划 > 真题更新重排 > 真题分析 > 检索 > 傅献彩 > 错因 > 复习 > 卡片 > 轮次 > 兜底
+ *   笔记 > 今日计划 > 真题更新重排 > 真题分析 > 检索 > 错因 > 复习 > 卡片 > 轮次 > 兜底
  * 要点：「把今天整理成笔记」含「今天」，必须由「笔记/总结」分支优先匹配，否则会被误转发为「生成今日计划」。
  */
 export function classifyPromptIntent(text: string): PromptIntent {
@@ -87,9 +86,9 @@ export function classifyPromptIntent(text: string): PromptIntent {
   if (text.includes("今天") || text.includes("学什么")) return { type: "plan" };
   if (text.includes("分析") && text.includes("真题") && (text.includes("更新") || text.includes("重排"))) return { type: "agent-workflow" };
   if (text.includes("分析") && text.includes("真题")) return { type: "exam-analysis" };
-  if (text.includes("化学势") || (text.includes("真题") && text.includes("找"))) return { type: "search-questions" };
-  if (text.includes("傅献彩") || text.includes("哪里讲")) return { type: "fu-suggest" };
-  if (text.includes("错") || text.includes("不会")) return { type: "mistake-analysis" };
+  if (text.includes("真题") && text.includes("找")) return { type: "search-questions" };
+  // 错因分析：仅匹配明确的错因/错题意图，避免「没错」「搞错了」等口语误触发
+  if (/错因|错题|错误分析|为什么.*错|总.*错|老是错|老错|做错|容易错|错在|不会做|不会.*这道|这道.*不会|这题.*不会|不会.*题/.test(text)) return { type: "mistake-analysis" };
   if (text.includes("复习")) return { type: "review-cards" };
   if (text.includes("卡片") || text.includes("填空卡") || text.includes("公式卡")) return { type: "create-card" };
   if (text.includes("第几轮")) return { type: "round-info" };

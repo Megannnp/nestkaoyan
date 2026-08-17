@@ -1,5 +1,12 @@
 "use client";
 
+import type {
+  AgentStep, AppSettings, Annotation, CardCategory, ChatSession, ExamGoal,
+  GrowthCard, KnowledgeNode, Material, MaterialSection, Note, PendingItem,
+  PlanLog, Question, Resource, Review, StudyDay, StudyDraft, StructuredReview,
+  Subject, Task,
+} from "./types";
+
 /**
  * Storage Contract（Stabilization 1C-1 实现）
  *
@@ -30,12 +37,116 @@ export const CORRUPT_BACKUP_KEY = "nest-exam-workspace-v5.corrupt_backup";
 const MIGRATED_AT_KEY = "__migratedAt";
 const UI_STATE_KEY_PREFIX = "nest-exam-ui:";
 
+/**
+ * Workspace 快照（page.tsx save effect 的字段清单 + 兼容字段）。
+ *
+ * - 已知业务字段全部强类型化：hydrate 侧通过 if 守卫即可收窄，无需手工断言。
+ * - 其余未声明字段（如 v4 Memory 引擎字段 longTermMemory 等）经索引签名保持
+ *   `unknown`，由调用方在需要时以类型守卫/断言访问，避免 `any` 扩散。
+ */
 export type WorkspaceSnapshot = {
   storageVersion?: number;
-  /** 业务字段任意类型（与 JSON.parse 行为一致，由调用方按已知结构访问） */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [key: string]: any;
+  exam?: ExamGoal;
+  appSettings?: AppSettings;
+  subjects?: Subject[];
+  activeKnowledgeSubject?: string;
+  activeCardSubject?: string;
+  resources?: Resource[];
+  materials?: Material[];
+  materialSections?: MaterialSection[];
+  questions?: Question[];
+  nodes?: KnowledgeNode[];
+  tasks?: Task[];
+  pending?: PendingItem[];
+  notes?: Note[];
+  cards?: GrowthCard[];
+  annotations?: Annotation[];
+  activeResourceId?: string;
+  readerSearch?: string;
+  readerPage?: string;
+  readerZoom?: string;
+  studyDays?: StudyDay[];
+  agentSteps?: AgentStep[];
+  logs?: PlanLog[];
+  chatSessions?: ChatSession[];
+  activeSessionId?: string;
+  review?: Review;
+  structuredReviews?: StructuredReview[];
+  studyDraft?: StudyDraft;
+  cardCategories?: CardCategory[];
+  onboardingCompleted?: boolean;
+  /** 旧版 chat 数组（迁移源，见 chat.migrateLegacyChat） */
+  chat?: unknown;
+  timer?: {
+    activeTimerTaskId?: string;
+    timerStartTime?: string;
+    timerAccumSeconds?: number;
+    timerRunStartEpoch?: number;
+  };
+  /** 其余未声明的兼容字段（v4 Memory 字段等）保持 unknown */
+  [key: string]: unknown;
 };
+
+/**
+ * 构建持久化快照所需的全部业务 state（page.tsx save effect 与 handleExportData
+ * 共用同一清单——新增/删除持久化字段只需改此处一处，杜绝两处清单漂移）。
+ */
+export interface WorkspaceStateInput {
+  exam: ExamGoal;
+  appSettings: AppSettings;
+  subjects: Subject[];
+  activeKnowledgeSubject: string;
+  activeCardSubject: string;
+  resources: Resource[];
+  materials: Material[];
+  materialSections: MaterialSection[];
+  questions: Question[];
+  nodes: KnowledgeNode[];
+  tasks: Task[];
+  pending: PendingItem[];
+  notes: Note[];
+  cards: GrowthCard[];
+  annotations: Annotation[];
+  activeResourceId: string;
+  readerSearch: string;
+  readerPage: string;
+  readerZoom: string;
+  studyDays: StudyDay[];
+  agentSteps: AgentStep[];
+  logs: PlanLog[];
+  chatSessions: ChatSession[];
+  activeSessionId: string;
+  review: Review;
+  structuredReviews: StructuredReview[];
+  studyDraft: StudyDraft | null;
+  categories: CardCategory[];
+  onboardingCompleted: boolean;
+  timer: {
+    activeTimerTaskId: string;
+    timerStartTime: string;
+    timerAccumSeconds: number;
+    timerRunStartEpoch: number;
+  };
+}
+
+/** 从内存 state 构建持久化快照（唯一字段清单；不含 storageVersion，由 saveWorkspace 注入） */
+export function buildWorkspaceSnapshot(input: WorkspaceStateInput): Omit<WorkspaceSnapshot, "storageVersion"> {
+  const {
+    exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
+    resources, materials, materialSections, questions, nodes, tasks, pending, notes, cards, annotations,
+    activeResourceId, readerSearch, readerPage, readerZoom,
+    studyDays, agentSteps, logs, chatSessions, activeSessionId, review, structuredReviews, studyDraft,
+    categories, onboardingCompleted, timer,
+  } = input;
+  return {
+    exam, appSettings, subjects, activeKnowledgeSubject, activeCardSubject,
+    resources, materials, materialSections, questions, nodes, tasks, pending, notes, cards, annotations,
+    activeResourceId, readerSearch, readerPage, readerZoom,
+    studyDays, agentSteps, logs, chatSessions, activeSessionId, review, structuredReviews, studyDraft,
+    cardCategories: categories, onboardingCompleted,
+    timer: { ...timer },
+  };
+}
 
 function safeParse(raw: string | null): Record<string, unknown> | null {
   if (!raw) return null;
@@ -58,6 +169,29 @@ function writeRaw(key: string, value: unknown): boolean {
 
 export function saveUiState(key: string, value: unknown): boolean {
   return writeRaw(`${UI_STATE_KEY_PREFIX}${key}`, value);
+}
+
+/** 读取 UI 状态（如 Sidebar 热力图折叠态）。无数据/解析失败返回 null。 */
+export function loadUiState(key: string): unknown {
+  try {
+    const raw = window.localStorage.getItem(`${UI_STATE_KEY_PREFIX}${key}`);
+    if (!raw) return null;
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 一次性迁移辅助：读取历史直写 key 的原始字符串值（如旧 `kaoyan-heatmap-expanded`
+ * 直接存 `"1"`/`"0"` 非 JSON）。只读不写；新代码统一走 loadUiState/saveUiState。
+ */
+export function readLegacyRawValue(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
 function mirrorWorkspaceToD1(snapshot: WorkspaceSnapshot) {

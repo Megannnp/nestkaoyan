@@ -9,12 +9,12 @@ test.beforeEach(async ({ page }) => {
   await freshState(page);
 });
 
-/** 知识中心 → 828 物理化学 → 学习资料（Reader） */
+/** 知识中心 → 政治 → 学习资料（Reader） */
 async function gotoReader(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "知识中心" }).click();
   // 等待事件系统稳定（Vite HMR 并行 worker 下 click 事件可能尚未绑定）
   await page.waitForTimeout(300);
-  await page.getByRole("button", { name: "828 物理化学" }).first().click();
+  await page.getByRole("button", { name: "政治" }).first().click();
   await page.getByRole("button", { name: "学习资料" }).click();
   await expect(page.locator(".bookshelf-grid .book-card").first()).toBeVisible();
   await page.locator(".bookshelf-grid .book-card").first().click();
@@ -47,8 +47,8 @@ test.describe("Reader 阅读器", () => {
 
     const searchInput = page.locator("input[placeholder='🔍 搜索']").first();
     await expect(searchInput).toBeVisible();
-    await searchInput.fill("熵变");
-    await expect(searchInput).toHaveValue("熵变");
+    await searchInput.fill("现代化");
+    await expect(searchInput).toHaveValue("现代化");
     // 输入不被清空，且页面不崩溃（seed 批注存在时内容区被批注覆盖，不强制高亮）
     await expect(page.locator(".readerGrid, [class*=readerGrid]").first()).toBeVisible();
 
@@ -74,16 +74,16 @@ test.describe("Reader 阅读器", () => {
     expectNoCriticalConsoleIssues(issues, "reader-zoom");
   });
 
-  test("演示模式内容渲染", async ({ page }) => {
+  test("内置真题 PDF 原卷渲染", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
     await gotoReader(page);
 
-    await expect(page.getByText("演示模式（Demo）")).toBeVisible();
-    await expect(page.locator("[class*=readerContent] p").first()).toBeVisible();
+    // 政治 2024 有 staticPdf → pdf.js 渲染真实原卷 canvas（不再是演示概览）
+    await expect(page.locator("[class*=pdfPageWrap], [class*=readerCanvas]").first()).toBeVisible();
 
     const issues = collector.getIssues();
-    expectNoCriticalConsoleIssues(issues, "reader-demo-content");
+    expectNoCriticalConsoleIssues(issues, "reader-pdf-render");
   });
 
   test("AI 阅读助手折叠展开", async ({ page }) => {
@@ -93,8 +93,9 @@ test.describe("Reader 阅读器", () => {
 
     const aiSummary = page.locator("[class*=aiAssistantSummary]").first();
     await aiSummary.click();
-    await expect(page.getByText("本页重点：")).toBeVisible();
-    await expect(page.getByText("考频：")).toBeVisible();
+    // 展开后展示资料信息与操作按钮（不再断言模型流式输出文本，输出内容随 DeepSeek 变化）
+    await expect(page.getByText(/资料：/).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "📄 找真题" })).toBeVisible();
 
     const issues = collector.getIssues();
     expectNoCriticalConsoleIssues(issues, "reader-ai-assistant");
@@ -181,33 +182,30 @@ test.describe("Reader 阅读器", () => {
     expectNoCriticalConsoleIssues(issues, "reader-annotation-delete");
   });
 
-  test("PDF 上传 → AI 识别 → 确认保存", async ({ page }) => {
+  test("PDF 上传 → AI 自动识别 → 资源入库", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
     await gotoReader(page);
-    await page.getByRole("button", { name: "← 返回" }).click();
-    await page.getByRole("button", { name: "上传资料" }).click();
+    await page.getByRole("button", { name: "← 返回书架" }).click();
+    await page.getByRole("button", { name: "上传真题" }).click();
 
     const dialog = page.getByLabel("AI识别资料");
     await expect(dialog).toBeVisible();
-    const fileInput = page.locator('input[type="file"]');
+    const fileInput = page.locator('input[type="file"]').first();
     await fileInput.setInputFiles({
-      name: "傅献彩物理化学E2E.pdf",
+      name: "politics-2025.pdf",
       mimeType: "application/pdf",
       buffer: DEMO_PDF,
     });
 
-    // AI 识别状态机推进到 done
-    await expect(dialog.getByText("AI 识别结果")).toBeVisible({ timeout: 5000 });
-    await dialog.getByRole("button", { name: "确认保存" }).click();
-
-    // 资源卡出现（inferResource 会把文件名规范化为 傅献彩《物理化学》）
-    await expect(page.locator(".book-card", { hasText: "傅献彩《物理化学》" }).first()).toBeVisible();
+    // 2026-08-03 起上传即自动 AI 识别入库（不再进入待确认队列）
+    // 等待上传完成消息（验证上传链路与自动识别）
+    await expect(page.getByText(/批量上传完成|AI 自动识别完成/).first()).toBeVisible({ timeout: 10000 });
 
     // 持久化（按 fileName 检查原始文件名）
     await waitForStoredData(
       page,
-      (data) => ((data.resources as { fileName: string }[]) || []).some((r) => r.fileName === "傅献彩物理化学E2E.pdf"),
+      (data) => ((data.resources as { fileName: string }[]) || []).some((r) => r.fileName === "politics-2025.pdf"),
       "reader-pdf-upload"
     );
 

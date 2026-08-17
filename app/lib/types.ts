@@ -84,9 +84,9 @@ export const RESOURCE_KIND_TO_LEGACY_TYPE: Record<ResourceType, string> = {
  * v6 起 materials/materialSections 作为资料层权威结构；resources 保留为旧 UI/Reader 兼容字段。
  */
 export type MaterialType =
-  | "textbook"       // 教材：傅献彩第六版
-  | "past_paper"     // 真题：哈工大828 2015-2025
-  | "exercise_book"  // 习题集：沈文霞考研指导
+  | "textbook"       // 教材：如《高等数学》基础篇
+  | "past_paper"     // 真题：政治/英语一/数学二 历年真题
+  | "exercise_book"  // 习题集：660 / 李林880 等
   | "handout"        // 讲义/笔记：自己整理的笔记
   | "lecture";       // 课程讲义
 
@@ -140,7 +140,7 @@ export function resourceToMaterial(resource: Resource, subjectId = resource.subj
     type: resource.type.includes("真题") ? "past_paper"
       : resource.type.includes("教材") ? "textbook"
       : resource.type.includes("辅导") || resource.type.includes("习题") ? "exercise_book"
-      : resource.type.includes("笔记") ? "handout" : "lecture",
+      : resource.type.includes("笔记") || resource.type.includes("图片") || resource.type.includes("讲义") ? "handout" : "lecture",
     status: resource.status === "已索引" ? "analyzed" : "pending",
     fileStorageKey: resource.fileStorageKey,
     fileName: resource.fileName,
@@ -167,7 +167,9 @@ export function resourceToMaterialSections(resource: Resource, questions: Questi
       analyzed: resource.status === "已索引",
     }));
   }
-  const title = resource.linkedNode.split("/").map((part) => part.trim()).filter(Boolean).slice(-1)[0] || resource.name;
+  // 非真题资料：section 标题取 linkedNode 末段；占位（待AI关联…）时回退资源名
+  const nodeParts = resource.linkedNode.split("/").map((part) => part.trim()).filter(Boolean);
+  const title = (nodeParts.length === 0 || resource.linkedNode.includes("待")) ? resource.name : nodeParts[nodeParts.length - 1];
   return [{
     id: `${resource.id}-section-main`,
     materialId: resource.id,
@@ -199,8 +201,8 @@ export type Resource = {
   lastRead: string;
   readingMinutes: string;
   linkedNode: string;
-  /** Stabilization 1A: 资源种类——真实 PDF（IndexedDB）或演示（Demo 模拟） */
-  kind?: "pdf" | "demo";
+  /** Stabilization 1A: 资源种类——真实 PDF / DOCX / 文本 / 图片（IndexedDB）或演示（Demo 模拟） */
+  kind?: "pdf" | "docx" | "text" | "image" | "demo";
   /** Stabilization 1A: IndexedDB 中 PDF 文件主键（仅 kind === "pdf"） */
   fileStorageKey?: string;
   /** Stabilization 1A: 文件大小（字节） */
@@ -458,8 +460,19 @@ export const ANNOTATION_TAGS = [
   "易错",
   /** 🟢 自己的理解、归纳和记忆方法 */
   "总结",
-  /** ⚪ 旧版默认标签（兼容历史数据） */
+  /** ⚪ 旧版标签（仅兼容历史数据，新建时不再提供；isAnnotationTag 仍视为合法避免历史数据报警） */
   "核心概念",
+] as const;
+
+/**
+ * 用户新建批注时可选的标签（界面权威集合）。
+ * 「核心概念」与「重点」语义重叠，已从新建选项中移除，仅作为历史兼容值保留。
+ */
+export const NEW_ANNOTATION_TAGS = [
+  "重点",
+  "疑问",
+  "易错",
+  "总结",
 ] as const;
 
 /** 批注颜色标签定义（合法值限于 ANNOTATION_TAGS） */
@@ -470,7 +483,7 @@ export const ANNOTATION_COLORS: Record<AnnotationTag, { dot: string; bg: string;
   "重点": { dot: "🟡", bg: "#FEF9C3", border: "#EAB308", label: "重要公式、定义、结论" },
   "疑问": { dot: "🔵", bg: "#DBEAFE", border: "#3B82F6", label: "暂时没理解、需要继续追问" },
   "易错": { dot: "🔴", bg: "#FEE2E2", border: "#EF4444", label: "容易混淆、容易用错、容易漏条件" },
-  "总结": { dot: "🟢", bg: "#DCFCE7", border: "#22C55E", label: "自己的理解、归纳和记忆方法" },
+  "总结": { dot: "🟢", bg: "#E4E4E7", border: "#71717A", label: "自己的理解、归纳和记忆方法" },
   "核心概念": { dot: "⚪", bg: "#F4F4F5", border: "#A1A1AA", label: "核心概念、定义" },
 };
 

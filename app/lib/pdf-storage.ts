@@ -8,8 +8,10 @@
  */
 
 export const PDF_DB_NAME = "nest-exam-pdf-files";
-export const PDF_DB_VERSION = 1;
+export const PDF_DB_VERSION = 2;
 export const PDF_STORE_NAME = "files";
+/** 文档解析文本存储 key 后缀：fileStorageKey + DOCX_TEXT_KEY_SUFFIX = 该文件的纯文本 */
+export const DOCX_TEXT_KEY_SUFFIX = ":text";
 
 export interface StoredPdfFile {
   /** 与 Resource.fileStorageKey 关联 */
@@ -79,12 +81,45 @@ export async function loadPdfBlob(fileStorageKey: string): Promise<Blob | null> 
   });
 }
 
+/** 保存文档解析文本（docx 等）到 IndexedDB（key = fileStorageKey + ":text"） */
+export async function saveDocText(fileStorageKey: string, text: string): Promise<boolean> {
+  if (!text) return false;
+  const db = await openDb();
+  const textKey = `${fileStorageKey}${DOCX_TEXT_KEY_SUFFIX}`;
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(PDF_STORE_NAME, "readwrite");
+    tx.objectStore(PDF_STORE_NAME).put({ fileStorageKey: textKey, blob: new Blob([text], { type: "text/plain" }), name: textKey, mimeType: "text/plain", size: text.length, createdAt: new Date().toISOString() });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("文本保存失败"));
+  });
+  return true;
+}
+
+/** 读取文档解析文本 */
+export async function loadDocText(fileStorageKey: string): Promise<string> {
+  const db = await openDb();
+  const text = await new Promise<string>((resolve) => {
+    const tx = db.transaction(PDF_STORE_NAME, "readonly");
+    const request = tx.objectStore(PDF_STORE_NAME).get(`${fileStorageKey}${DOCX_TEXT_KEY_SUFFIX}`);
+    request.onsuccess = () => {
+      const record = request.result as StoredPdfFile | undefined;
+      if (!record?.blob) { resolve(""); return; }
+      record.blob.text().then(resolve, () => resolve(""));
+    };
+    request.onerror = () => resolve("");
+  });
+  return text;
+}
+
 /** 删除 PDF 文件（资源删除时清理） */
 export async function deletePdfFile(fileStorageKey: string): Promise<void> {
+  const textKey = `${fileStorageKey}${DOCX_TEXT_KEY_SUFFIX}`;
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(PDF_STORE_NAME, "readwrite");
-    tx.objectStore(PDF_STORE_NAME).delete(fileStorageKey);
+    const store = tx.objectStore(PDF_STORE_NAME);
+    store.delete(fileStorageKey);
+    store.delete(textKey);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("PDF 删除失败"));
   });

@@ -4,14 +4,14 @@
  * 追加式（append-only）事实流，是 Memory Engine 的唯一真相源。
  * Sprint 1 只采集三种事件：
  *   - study_completed     学习/任务完成（Dashboard Completion）
- *   - card_reviewed       成长卡片复习（Cards Review）
+ *   - card_reviewed       沉淀卡片复习（Cards Review）
  *   - question_answered   做题结果（Questions Result）
  *
  * 设计约束：
  *   - 不投影 KnowledgeState / ReviewSchedule（Sprint 2+ 再做）
  *   - UI 继续读旧状态（tasks/cards/questions），本模块是纯副作用
  *   - 不删除、不修改现有 v3 逻辑
- *   - 独立 v4 key：nest-exam-workspace-v4
+ *   - 独立 v4 key：nest-exam-learning-events-v4（与 workspace v4 key 隔离，避免冲突）
  *
  * 版本策略（2026-07-31 反馈新增）：
  *   - 每条事件携带 `version`（当前 1），payload 结构演进时通过版本号识别代际
@@ -124,7 +124,32 @@ export function createLearningEvent(
 // v4 独立存储（与 v3 业务数据完全隔离）
 // ════════════════════════════════════════════════════════════
 
-const ENGINE_KEY = "nest-exam-workspace-v4";
+/** 事件流独立存储 key（与 workspace v4 key 隔离，符合 STORAGE_CONTRACT.md §3.2） */
+const ENGINE_KEY = "nest-exam-learning-events-v4";
+/**
+ * 旧误用 key：早期实现错误地复用了 workspace v4 key（nest-exam-workspace-v4），
+ * 与 legacy Memory Engine 数据同键。仅用于迁移其中合法的事件数据，不写入。
+ */
+const LEGACY_ENGINE_KEY = "nest-exam-workspace-v4";
+
+/** 尝试从旧误用 key 读取合法事件数据（无/非事件结构/未来版本均返回 null） */
+function readLegacyEvents(): LearningEvent[] | null {
+  try {
+    const raw = window.localStorage.getItem(LEGACY_ENGINE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as StoredEngineData;
+    if (!Array.isArray(data.learningEvents)) return null;
+    if (
+      typeof data.eventSchemaVersion === "number" &&
+      data.eventSchemaVersion > EVENT_SCHEMA_VERSION
+    ) {
+      return null;
+    }
+    return data.learningEvents.map(normalizeEvent);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * 读取全部学习事件（无数据 / 解析失败时返回空数组）。
@@ -132,11 +157,22 @@ const ENGINE_KEY = "nest-exam-workspace-v4";
  *   - eventSchemaVersion 缺失 → 视为 v1
  *   - eventSchemaVersion > 当前版本 → 拒绝读取（保护未来数据，返回空数组）
  *   - 事件缺 version → 提升为 v1
+ *   - 新 key 为空时 → 尝试从旧误用 key 迁移合法事件（一次性；不覆盖旧 workspace v4 数据）
  */
 export function loadLearningEvents(): LearningEvent[] {
   try {
     const raw = window.localStorage.getItem(ENGINE_KEY);
-    if (!raw) return [];
+    if (!raw) {
+      // 首次切换新 key：若旧误用 key 中确实有合法事件数据，迁移到新 key 后使用
+      const legacy = readLegacyEvents();
+      if (legacy && legacy.length > 0) {
+        persistEngineData({
+          eventSchemaVersion: EVENT_SCHEMA_VERSION,
+          learningEvents: legacy,
+        });
+      }
+      return legacy ?? [];
+    }
     const data = JSON.parse(raw) as StoredEngineData;
     if (
       typeof data.eventSchemaVersion === "number" &&

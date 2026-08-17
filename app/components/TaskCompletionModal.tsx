@@ -41,7 +41,7 @@ export function TaskCompletionModal() {
                         autoFocus
                       />
                     ) : (
-                      <strong className="text-[#0F766E]">{completionModalCustomMinutes} 分钟</strong>
+                      <strong className="text-[#18181B]">{completionModalCustomMinutes} 分钟</strong>
                     )}
                     <span className="text-[#71717A]">分钟</span>
                     {!completionModalAllowEditTime ? (
@@ -53,7 +53,7 @@ export function TaskCompletionModal() {
                       </button>
                     ) : (
                       <button
-                        className="text-[11px] px-1.5 py-0.5 rounded bg-white text-[#0F766E] border border-[#0F766E]"
+                        className="text-[11px] px-1.5 py-0.5 rounded bg-white text-[#18181B] border border-[#18181B]"
                         onClick={() => setCompletionModalAllowEditTime(false)}
                       >
                         确认

@@ -5,81 +5,71 @@ test.beforeEach(async ({ page }) => {
   await freshState(page);
 });
 
-/** 知识中心 → 828 物理化学 → 真题数据库 */
+/** 知识中心 → 政治（seed 真题所在科目）→ 真题库 */
 async function gotoQuestions(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "知识中心" }).click();
   await expect(page.getByRole("heading", { name: "知识中心" })).toBeVisible({ timeout: 15000 });
-  await page.getByRole("button", { name: "828 物理化学" }).first().click();
-  await page.getByRole("button", { name: "真题数据库" }).click();
-  await expect(page.getByRole("heading", { name: "真题数据库" })).toBeVisible();
+  await page.getByRole("button", { name: "政治" }).first().click();
+  await page.getByRole("button", { name: "真题库" }).click();
+  await expect(page.getByRole("heading", { name: "真题库" })).toBeVisible();
 }
 
-test.describe("Questions 真题数据库", () => {
-  test("筛选条与题目列表渲染", async ({ page }) => {
+test.describe("Questions 真题库", () => {
+  test("套卷书架渲染：整套真题以 book-card 展示", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
     await gotoQuestions(page);
 
-    await expect(page.locator(".filter-bar")).toBeVisible();
-    await expect(page.locator(".question-list article").first()).toBeVisible();
+    // 真题库是「一套一套真题」书架，不是逐题列表
+    await expect(page.locator(".bookshelf-grid .book-card").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "上传真题" })).toBeVisible();
+    await expect(page.getByText(/套真题/).first()).toBeVisible();
 
     const issues = collector.getIssues();
-    expectNoCriticalConsoleIssues(issues, "questions-list");
+    expectNoCriticalConsoleIssues(issues, "questions-shelf");
   });
 
-  test("七核筛选：热力学过滤列表", async ({ page }) => {
+  test("套卷详情：含年份与题量信息（无逐题七核字段）", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
     await gotoQuestions(page);
 
-    const countBefore = await page.locator(".question-list article").count();
-    expect(countBefore).toBeGreaterThan(0);
-
-    await page.locator(".filter-bar select").nth(1).selectOption({ label: "热力学" });
-    await page.waitForTimeout(200);
-    const countAfter = await page.locator(".question-list article").count();
-    expect(countAfter).toBeLessThanOrEqual(countBefore);
-    expect(countAfter).toBeGreaterThan(0);
+    const firstPaper = page.locator(".bookshelf-grid .book-card").first();
+    await expect(firstPaper).toBeVisible();
+    // 展示年份（materialSections 回填）与题目数
+    await expect(firstPaper.getByText(/年/).first()).toBeVisible();
+    await expect(firstPaper.getByText(/道题|整套直接阅读/)).toBeVisible();
+    // 移除逐题七核字段：不渲染 core/branch/knowledge 逐题元数据
+    await expect(page.locator(".question-list")).toHaveCount(0);
 
     const issues = collector.getIssues();
-    expectNoCriticalConsoleIssues(issues, "questions-filter-core");
+    expectNoCriticalConsoleIssues(issues, "questions-shelf-detail");
   });
 
-  test("科目筛选：切换科目后列表同步隔离", async ({ page }) => {
+  test("科目 Tab 切换后真题库按学科隔离（无跨学科套卷）", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
     await gotoQuestions(page);
-    await expect(page.locator(".question-list article").first()).toContainText("828 物理化学");
+    await expect(page.locator(".bookshelf-grid .book-card").first()).toBeVisible();
 
-    await page.locator(".filter-bar select").first().selectOption({ label: "英语一" });
-    await expect(page.locator(".question-list article")).toHaveCount(0);
-    await expect(page.getByText("当前筛选下没有真题。")).toBeVisible();
-
-    await page.locator(".filter-bar select").first().selectOption({ label: "828 物理化学" });
-    await expect(page.locator(".question-list article").first()).toContainText("828 物理化学");
-
-    const issues = collector.getIssues();
-    expectNoCriticalConsoleIssues(issues, "questions-filter-subject");
-  });
-
-  test("科目 Tab 切换会重置真题科目筛选", async ({ page }) => {
-    const collector = attachConsoleCollector(page);
-
-    await gotoQuestions(page);
-    await page.locator(".filter-bar select").first().selectOption({ label: "英语一" });
-    await expect(page.locator(".question-list article")).toHaveCount(0);
-
+    // 2026-08-14：英语一内置 16 套真题（2010-2025），不跨学科展示政治套卷
     await page.getByRole("button", { name: "← 返回" }).click();
-    await page.getByRole("button", { name: "828 物理化学" }).first().click();
-    await page.getByRole("button", { name: "真题数据库" }).click();
-    await expect(page.locator(".question-list article").first()).toContainText("828 物理化学");
+    await page.getByRole("button", { name: "英语一" }).first().click();
+    await page.getByRole("button", { name: "真题库" }).click();
+    await expect(page.locator(".bookshelf-grid .book-card")).toHaveCount(16);
+    await expect(page.locator(".bookshelf-grid .book-card").first()).toContainText("2024 考研英语一真题");
+
+    // 切回政治 → 套卷恢复
+    await page.getByRole("button", { name: "← 返回" }).click();
+    await page.getByRole("button", { name: "政治" }).first().click();
+    await page.getByRole("button", { name: "真题库" }).click();
+    await expect(page.locator(".bookshelf-grid .book-card").first()).toBeVisible();
 
     const issues = collector.getIssues();
-    expectNoCriticalConsoleIssues(issues, "questions-subject-tab-reset");
+    expectNoCriticalConsoleIssues(issues, "questions-subject-tab-isolation");
   });
 
-  test("上传真题入口可添加空白真题卷", async ({ page }) => {
+  test("上传真题入口可添加空白真题卷（整套入库）", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
     await gotoQuestions(page);
@@ -92,6 +82,7 @@ test.describe("Questions 真题数据库", () => {
     await expect(dialog).toHaveCount(0);
     await expect(page.getByText(/空白真题卷/).first()).toBeVisible();
 
+    // 持久化：整套以 resource + material(past_paper) + materialSections(exam) 入库
     const saved = await waitForStoredData(
       page,
       (data) => {
@@ -99,8 +90,7 @@ test.describe("Questions 真题数据库", () => {
         const resource = resources.find((item) => item.name?.includes("空白真题卷") && item.type === "真题");
         if (!resource?.id) return false;
         return ((data.materials as { id?: string; type?: string }[]) || []).some((material) => material.id === resource.id && material.type === "past_paper")
-          && ((data.materialSections as { materialId?: string; sectionType?: string }[]) || []).some((section) => section.materialId === resource.id && section.sectionType === "exam")
-          && ((data.questions as { materialId?: string; stem?: string }[]) || []).some((question) => question.materialId === resource.id && question.stem?.includes("待 AI 拆题"));
+          && ((data.materialSections as { materialId?: string; sectionType?: string }[]) || []).some((section) => section.materialId === resource.id && section.sectionType === "exam");
       },
       "questions-blank-paper"
     );
@@ -111,78 +101,34 @@ test.describe("Questions 真题数据库", () => {
     expectNoCriticalConsoleIssues(issues, "questions-add");
   });
 
-  test("内联编辑做题记录：结果选错误", async ({ page }) => {
+  test("套卷可点击直接进入阅读（整套不拆题）", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
     await gotoQuestions(page);
-    const item = page.locator(".question-list article").first();
-    const itemTitle = await item.locator("strong").textContent();
-    await item.locator("summary", { hasText: "做题记录/编辑" }).click();
-    await item.locator("select").first().selectOption({ label: "错误" });
+    const firstPaper = page.locator(".bookshelf-grid .book-card").first();
+    await firstPaper.click();
 
-    const saved = await waitForStoredData(
-      page,
-      (data) =>
-        ((data.questions as { result: string; done: boolean }[]) || []).some((q) => q.result === "错误" && q.done === true),
-      "questions-inline-edit"
-    );
-    const edited = (saved.questions as { result: string; done: boolean }[]).find((q) => q.result === "错误" && q.done === true);
-    if (!edited) throw new Error(`未找到已编辑题目：${itemTitle ?? ""}`);
-    expect(edited.result).toBe("错误");
-    expect(edited.done).toBe(true);
+    // 点击套卷 → 进入 Reader 阅读整套真题（2026-08-17 真题库支持 readingMode；无 heading，标题在 Reader 顶部栏）
+    await expect(page.locator(".readerGrid, [class*=readerGrid]").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "← 返回书架" })).toBeVisible();
 
     const issues = collector.getIssues();
-    expectNoCriticalConsoleIssues(issues, "questions-inline-edit");
+    expectNoCriticalConsoleIssues(issues, "questions-open-paper");
   });
 
-  test("收藏题目（切换收藏状态）", async ({ page }) => {
+  test("删除套卷（⋯ 菜单）", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
     await gotoQuestions(page);
+    const beforeCount = await page.locator(".bookshelf-grid .book-card").count();
+    expect(beforeCount).toBeGreaterThan(0);
 
-    const firstItem = page.locator(".question-list article").first();
-    await firstItem.locator("summary", { hasText: "做题记录/编辑" }).click();
-    const favoriteBtn = firstItem.getByRole("button", { name: "收藏" }).or(firstItem.getByRole("button", { name: "取消收藏" }));
-    await expect(favoriteBtn).toBeVisible();
-    const beforeText = await favoriteBtn.textContent();
-    const wasFavorited = beforeText?.includes("取消收藏") ?? false;
+    const firstPaper = page.locator(".bookshelf-grid .book-card").first();
+    const deletedTitle = await firstPaper.locator(".book-title").textContent();
+    await firstPaper.locator(".more-menu summary").click();
+    await firstPaper.getByRole("button", { name: "删除" }).click();
 
-    await favoriteBtn.click();
-
-    // 按钮文本翻转，表示收藏状态已切换
-    const afterBtn = firstItem.getByRole("button", { name: wasFavorited ? "收藏" : "取消收藏" });
-    await expect(afterBtn).toBeVisible();
-
-    // 持久化验证：与 UI 状态一致（seed 中部分题已是收藏状态）
-    await waitForStoredData(
-      page,
-      (data) => {
-        const questions = (data.questions as { favorite?: boolean }[]) || [];
-        if (wasFavorited) {
-          // 取消收藏 → 至少一个仍为 true（seed 余量）
-          return questions.some((q) => q.favorite === true) || questions.every((q) => q.favorite === false);
-        }
-        // 收藏 → 至少一个为 true
-        return questions.some((q) => q.favorite === true);
-      },
-      "questions-favorite"
-    );
-
-    const issues = collector.getIssues();
-    expectNoCriticalConsoleIssues(issues, "questions-favorite");
-  });
-
-  test("删除题目", async ({ page }) => {
-    const collector = attachConsoleCollector(page);
-
-    await gotoQuestions(page);
-    const beforeCount = await page.locator(".question-list article").count();
-    const item = page.locator(".question-list article").first();
-    const deletedTitle = await item.locator("strong").textContent();
-    await item.locator("summary", { hasText: "做题记录/编辑" }).click();
-    await item.getByRole("button", { name: "删除题目" }).click();
-
-    await expect(page.locator(".question-list article")).toHaveCount(beforeCount - 1);
+    await expect(page.locator(".bookshelf-grid .book-card")).toHaveCount(beforeCount - 1);
     if (deletedTitle) await expect(page.getByText(deletedTitle)).toHaveCount(0);
 
     const issues = collector.getIssues();

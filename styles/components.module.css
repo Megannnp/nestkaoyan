@@ -419,8 +419,8 @@
 .modalBackdrop {
   position: fixed;
   inset: 0;
-  /* 2026-08-03 体验修复：遮罩调浅，弹窗打开时保留背景内容可见（原本 0.3 过暗像白屏消失） */
-  background: rgba(0, 0, 0, 0.12);
+  /* 2026-08-05 体验修复：遮罩进一步调浅，设置弹窗打开时背景页面清晰可见（原本 0.12 仍偏暗像空白） */
+  background: rgba(0, 0, 0, 0.05);
   z-index: 100;
   display: flex;
   align-items: center;
@@ -462,6 +462,23 @@
   font-size: 12px;
   font-weight: 700;
   color: #71717A;
+}
+
+/* 静态内联样式迁移（2026-08-04 审查修复）：marginTop 等从 style={} 迁入 */
+.inputLabelMarginTop {
+  margin-top: 10px;
+}
+
+.subjectListMarginTop {
+  margin-top: 8px;
+}
+
+/* 数据管理说明文字：静态内联样式全量迁移 */
+.dataMgmtHint {
+  font-size: 12px;
+  color: #71717A;
+  margin-bottom: 12px;
+  line-height: 1.6;
 }
 
 /* ════════════════════════════════════════════
@@ -870,6 +887,19 @@
 .aiAssistantLabel {
   font-weight: 700;
   color: rgba(255, 255, 255, 0.6);
+}
+
+/* 静态内联样式迁移（2026-08-04 审查修复） */
+.aiAssistantLabelPointer {
+  cursor: pointer;
+}
+
+.aiAssistantMutedText {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.annotationPageDanger {
+  color: #DC2626;
 }
 
 .aiAssistantActions {
@@ -1547,6 +1577,30 @@
   cursor: text;
   transform-origin: 0% 0%;
 }
+/* 2026-08-05 优化：选中文字时给半透明蓝色背景高亮。
+   文字本身保持透明（不遮挡 canvas 渲染），但 ::selection 背景为半透明覆盖层，
+   让用户能清晰看到选中范围后再「存为批注」。 */
+.pdfTextLayer span::selection {
+  background: rgba(59, 130, 246, 0.35);
+  color: transparent;
+}
+.pdfTextLayer::selection {
+  background: rgba(59, 130, 246, 0.35);
+  color: transparent;
+}
+.pdfTextLayer :global(::selection) {
+  background: rgba(59, 130, 246, 0.35) !important;
+  color: transparent !important;
+}
+.pdfTextLayer span {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.pdfTextLayer br {
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* 拖拽选区过程中的实时高亮（Chrome/Safari 默认 ::selection 即时生效，无需额外处理） */
 
 /* 2026-08-04：选中文字后的快捷操作条 */
 .pdfSelectionBar {
@@ -1693,6 +1747,16 @@
   color: #A1A1AA;
   padding-top: 4px;
 }
+.readerTopBar{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #E4E4E7}
+.readerBackBtn{min-height:30px;padding:0 10px;border-radius:6px;background:#F4F4F5;color:#71717A;font-weight:600;font-size:12px;cursor:pointer;border:0;white-space:nowrap}
+.readerBackBtn:hover{background:#EDEDED;color:#18181B}
+.readerTopDivider{width:1px;height:16px;background:#E4E4E7}
+.readerTopTitle{font-size:14px;font-weight:700;color:#18181B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+.readerTopSpacer{flex:1}
+.readerTopProgress{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.readerProgressTrack{width:120px;height:6px;border-radius:999px;background:#F1F1F3;overflow:hidden}
+.readerProgressFill{height:100%;border-radius:999px;background:#27272A;transition:width .2s ease}
+.readerProgressText{font-size:11px;color:#A1A1AA;white-space:nowrap}
 
 /* 非法批注条 */
 .annotationInvalidItem {
@@ -1849,8 +1913,8 @@
 }
 
 .learningStatusOk {
-  background: #DCFCE7;
-  color: #15803D;
+  background: #E4E4E7;
+  color: #52525B;
 }
 
 .learningStatusFocus {
@@ -1974,3 +2038,984 @@
 :global(.thin-scrollbar)::-webkit-scrollbar-thumb:hover {
   background: #A1A1AA;
 }
+
+/* ═══ globals.css 迁移（2026-08-05）：字符串 className 用 :global() ═══ */
+
+/* Flashcard 3D Flip */
+:global(.flip-container) {
+  perspective: 1000px;
+  cursor: pointer;
+}
+
+:global(.flip-container .flipper) {
+  position: relative;
+  min-height: 260px;
+  transition: transform 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+  transform-style: preserve-3d;
+}
+
+:global(.flip-container.flipped .flipper) {
+  transform: rotateY(180deg);
+}
+
+:global(.flip-container .front),
+:global(.flip-container .back) {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  padding: 20px;
+  border: 1px solid #E4E4E7;
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+}
+
+:global(.flip-container .back) {
+  transform: rotateY(180deg);
+  background: #F4F4F5;
+}
+
+/* Tag / Badge metadata */
+:global(.tag-badge) {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+:global(.tag-badge.subtle) {
+  background: #F4F4F5;
+  color: #71717A;
+}
+
+:global(.tag-badge.green) {
+  background: #E4E4E7;
+  color: #52525B;
+}
+
+:global(.tag-badge.amber) {
+  background: #FEF3C7;
+  color: #B45309;
+}
+
+:global(.tag-badge.red) {
+  background: #FEE2E2;
+  color: #B91C1C;
+}
+
+:global(.tag-badge.purple) {
+  background: #F3E8FF;
+  color: #7C3AED;
+}
+
+/* Keyboard shortcut hints */
+:global(.kbd-hint) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.06);
+  font-size: 11px;
+  font-weight: 700;
+  color: #71717A;
+  font-family: inherit;
+}
+
+/* Focus Mode overlay */
+:global(.focus-overlay) {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(23, 32, 28, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+:global(.focus-overlay .focus-card) {
+  width: min(520px, 90vw);
+  padding: 32px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.3);
+}
+
+/* 更多菜单：绝对定位悬浮下拉 */
+:global(.more-menu) {
+  position: relative;
+}
+
+:global(.more-menu summary) {
+  cursor: pointer;
+  color: #71717A;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 8px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 8px;
+  background: #F4F4F5;
+}
+
+:global(.more-menu summary:hover),
+:global(.more-menu[open] summary) {
+  background: #EDEDED;
+}
+
+:global(.more-menu .more-items) {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 100px;
+  margin-top: 0;
+  padding: 4px;
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+:global(.more-menu .more-items .text-button) {
+  width: 100%;
+  margin-top: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 11px;
+  min-height: 26px;
+}
+
+:global(.more-menu .more-items .text-button:hover) {
+  background: #F4F4F5;
+}
+
+/* 文字按钮 */
+:global(.text-button) {
+  min-height: 32px;
+  margin-top: 10px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: #F4F4F5;
+  color: #18181B;
+  font-weight: 800;
+}
+
+/* ════════════════════════════════════════════
+   globals.css 大规模迁移（2026-08-06 第二批）
+   字符串 className 用 :global() 声明，样式集中到 CSS Module 管理。
+   迁移完成后 globals.css 只剩 :root / 基础元素 / 响应式 / KaTeX。
+   ════════════════════════════════════════════ */
+
+/* ─── 布局容器 ─── */
+:global(.workspace-pane) {
+  display: none;
+}
+
+:global(.workspace-pane.active) {
+  display: block;
+}
+
+:global(.hero-grid.workspace-pane.active) {
+  display: grid;
+}
+
+:global(.hero-grid) {
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.9fr);
+  gap: 20px;
+  min-height: calc(100vh - 56px);
+}
+
+:global(.hero-grid.dashboard-hero) {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: auto;
+}
+
+:global(.hero-grid.dashboard-hero .agent-panel) {
+  display: none;
+}
+
+:global(.hero-grid.agent-only) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+:global(.hero-grid.agent-only .engine-panel) {
+  display: none;
+}
+
+:global(.hero-grid.agent-only .agent-panel) {
+  min-height: calc(100vh - 150px);
+}
+
+:global(.agent-panel),
+:global(.engine-panel),
+:global(.dashboard),
+:global(.knowledge),
+:global(.workflow),
+:global(.graph-panel) {
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+  background: #FFFFFF;
+  box-shadow: 0 18px 60px rgba(34, 42, 38, 0.11);
+}
+
+:global(.agent-panel) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(24px, 5vw, 56px);
+}
+
+:global(.engine-panel) {
+  padding: 28px;
+}
+
+:global(.dashboard),
+:global(.knowledge),
+:global(.workflow) {
+  margin-top: 22px;
+  padding: 28px;
+}
+
+:global(.graph-panel) {
+  margin-top: 18px;
+  padding: 18px;
+  box-shadow: none;
+}
+
+/* ─── 区块标题 ─── */
+:global(.section-heading) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+:global(.compact-heading) {
+  margin-top: 18px;
+}
+
+:global(.section-hint) {
+  margin: -8px 0 0;
+  color: #71717A;
+  line-height: 1.5;
+}
+
+:global(.reader-panel .compact-heading) {
+  margin-top: 0;
+}
+
+:global(.section-label) {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+/* 次要文字统一 muted（原 .brand small, .section-label, .subject-top span 等共享块） */
+:global(.subject-top span),
+:global(.task-row span),
+:global(.task-row small),
+:global(.metric-grid span),
+:global(.countdown span),
+:global(.knowledge-card span),
+:global(.core-card span) {
+  color: #71717A;
+}
+
+/* ─── 指标网格 ─── */
+:global(.metric-grid) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+:global(.metric-grid div) {
+  padding: 16px;
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+  background: #FFFFFF;
+}
+
+:global(.metric-grid strong) {
+  display: block;
+  margin-top: 8px;
+  font-size: 26px;
+}
+
+:global(.review-metrics) {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+:global(.review-metrics strong) {
+  font-size: 22px;
+}
+
+/* ─── 任务列表 ─── */
+:global(.task-stack) {
+  display: grid;
+  gap: 10px;
+}
+
+:global(.task-row) {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+  background: #FFFFFF;
+}
+
+:global(.task-row.done) {
+  background: #F4F4F5;
+}
+
+:global(.task-check) {
+  display: flex;
+  align-items: center;
+  padding-top: 2px;
+}
+
+:global(.task-check input) {
+  min-height: auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+}
+
+:global(.task-content) {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+:global(.task-title-row) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+:global(.task-title-row strong) {
+  font-size: 15px;
+  flex: 1;
+  min-width: 0;
+}
+
+:global(.task-duration) {
+  color: #71717A;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:global(.task-row p) {
+  margin: 0;
+  color: #71717A;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+:global(.task-actions) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+:global(.task-actions .text-button) {
+  min-height: 28px;
+  margin-top: 0;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+:global(.inline-details) {
+  margin-top: 8px;
+}
+
+:global(.inline-details summary),
+:global(.form-section summary) {
+  cursor: pointer;
+  color: #18181B;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+:global(.inline-details summary) {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+}
+
+/* ─── 计时徽章 ─── */
+:global(.timer-badge) {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #FFF3CD;
+  color: #856404;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+/* ─── 任务进度条 / 抽屉 ─── */
+:global(.task-progress-bar) {
+  height: 6px;
+  border-radius: 999px;
+  background: #F4F4F5;
+  overflow: hidden;
+  margin: 6px 0;
+}
+
+:global(.task-progress-bar .fill) {
+  height: 100%;
+  border-radius: inherit;
+  background: #18181B;
+  transition: width 0.5s ease;
+}
+
+:global(.task-progress-bar .fill.green) {
+  background: #52525B;
+}
+
+:global(.task-progress-bar .fill.amber) {
+  background: #F59E0B;
+}
+
+:global(.task-progress-bar .fill.red) {
+  background: #EF4444;
+}
+
+:global(.task-drawer) {
+  display: none;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+  background: #F4F4F5;
+}
+
+:global(.task-drawer.open) {
+  display: block;
+}
+
+/* ─── 快速建卡表单 ─── */
+:global(.quick-card-form) {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #E4E4E7;
+  border-radius: 12px;
+  background: #FFFFFF;
+}
+
+:global(.quick-card-form .row) {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+:global(.quick-card-form input),
+:global(.quick-card-form select) {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* ─── 弹窗 ─── */
+:global(.modal-backdrop) {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(23, 32, 28, 0.34);
+}
+
+:global(.modal-panel) {
+  width: min(920px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow-y: auto;
+  padding: 18px;
+  border-radius: 8px;
+  background: #FFFFFF;
+  box-shadow: 0 24px 80px rgba(23, 32, 28, 0.24);
+}
+
+:global(.compact-modal) {
+  width: min(680px, 100%);
+}
+
+:global(.modal-head) {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+:global(.modal-head span),
+:global(.modal-head strong) {
+  display: block;
+}
+
+:global(.modal-head span) {
+  color: #71717A;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+:global(.modal-head strong) {
+  margin-top: 4px;
+  font-size: 22px;
+}
+
+:global(.modal-head button) {
+  align-self: flex-start;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: #F4F4F5;
+  color: #18181B;
+  font-weight: 800;
+}
+
+/* ─── 表单网格 ─── */
+:global(.form-grid) {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+:global(.form-section) {
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+  background: #FFFFFF;
+}
+
+:global(.form-section .form-grid) {
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
+:global(.form-grid input),
+:global(.form-grid select) {
+  width: 100%;
+}
+
+:global(.field) {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+:global(.field span) {
+  color: #71717A;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+:global(.field input),
+:global(.field select) {
+  min-width: 0;
+}
+
+:global(.wide-field) {
+  grid-column: span 2;
+}
+
+:global(.settings-form) {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+:global(.question-form) {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+:global(.check-pill) {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #D4D4D8;
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: #18181B;
+}
+
+:global(.check-pill input) {
+  min-height: auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+}
+
+:global(.mini-form) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+:global(.mini-form label) {
+  display: grid;
+  gap: 5px;
+}
+
+:global(.mini-form label span) {
+  color: #71717A;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+:global(.mini-form input),
+:global(.mini-form select) {
+  width: 100%;
+  min-height: 34px;
+  font-size: 13px;
+}
+
+:global(.mini-form button) {
+  grid-column: 1 / -1;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: #18181B;
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+:global(.modal-form) {
+  margin-top: 0;
+}
+
+/* ─── 书架（资料库） ─── */
+:global(.bookshelf-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+:global(.book-card) {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #E4E4E7;
+  border-radius: 10px;
+  background: #FFFFFF;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  cursor: pointer;
+}
+
+:global(.book-card:hover) {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  transform: translateY(-2px);
+}
+
+:global(.book-spine) {
+  width: 80px;
+  height: 112px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+:global(.book-spine.has-cover) {
+  background: #FFFFFF;
+  border: 1px solid #E4E4E7;
+}
+
+:global(.book-spine.empty-cover) {
+  background: #18181B;
+  color: white;
+}
+
+:global(.book-spine.empty-cover .initials) {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  word-break: break-all;
+}
+
+:global(.book-body) {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+:global(.book-body .book-title) {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #18181B;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+:global(.book-body .book-author) {
+  font-size: 12px;
+  color: #71717A;
+}
+
+:global(.book-body .book-tags) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+:global(.book-body .book-footer) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid #F1F1F3;
+}
+
+:global(.book-body .book-footer button) {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #18181B;
+  color: white;
+}
+
+:global(.book-body .book-footer .manage-btn) {
+  background: #F4F4F5;
+  color: #18181B;
+}
+
+/* ─── 空状态 / 知识列表 ─── */
+:global(.empty-state) {
+  margin: 0;
+  padding: 16px;
+  color: #71717A;
+  border-radius: 8px;
+  background: #F4F4F5;
+}
+
+:global(.knowledge-list) {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+/* ─── 主按钮（字符串 className，需 :global 版本） ─── */
+:global(.primary-btn) {
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: #18181B;
+  color: white;
+  font-weight: 700;
+  font-size: 13px;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+:global(.primary-btn:hover) {
+  background: #27272A;
+}
+
+:global(.secondary-btn) {
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: #F4F4F5;
+  color: #18181B;
+  font-weight: 600;
+  font-size: 13px;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+:global(.secondary-btn:hover) {
+  background: #E4E4E7;
+}
+
+/* ─── 次要按钮（secondary-button 字符串类） ─── */
+:global(.secondary-button),
+:global(.wide-button),
+:global(.form-grid button),
+:global(.question-list button),
+:global(.confirm-row button),
+:global(.source-row) {
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: #18181B;
+  color: #FFFFFF;
+  font-weight: 700;
+}
+
+:global(.wide-button) {
+  width: 100%;
+  margin-top: 14px;
+}
+
+/* ─── tag-badge 变体补全（warn/danger 在 TSX 中已使用但此前缺失） ─── */
+:global(.tag-badge.warn) {
+  background: #FEF3C7;
+  color: #B45309;
+}
+
+:global(.tag-badge.danger) {
+  background: #FEE2E2;
+  color: #B91C1C;
+}
+
+/* ─── AI 导入步骤 / 视图切换 / 手动录入（字符串类） ─── */
+:global(.ai-import-step) {
+  padding: 16px;
+  border: 1px solid #E4E4E7;
+  border-radius: 8px;
+  background: #FFFFFF;
+}
+
+:global(.ai-import-step .step-number) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: #18181B;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+:global(.ai-import-step .step-label) {
+  font-size: 13px;
+  font-weight: 700;
+  color: #18181B;
+}
+
+:global(.view-toggle) {
+  display: flex;
+  gap: 4px;
+}
+
+:global(.view-toggle button) {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #F4F4F5;
+  color: #71717A;
+}
+
+:global(.view-toggle button.active) {
+  background: #18181B;
+  color: white;
+}
+
+:global(.manual-entry-collapse summary) {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #71717A;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #F4F4F5;
+}
+
+:global(.manual-entry-collapse summary:hover) {
+  color: #18181B;
+}
+
+/* ─── 快捷提示（quick-prompts，2026-08-06 迁移补充） ─── */
+:global(.quick-prompts) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  max-width: 840px;
+  margin-bottom: 18px;
+}
+
+:global(.quick-prompts button) {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #D4D4D8;
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: #18181B;
+}
+
+:global(.quick-prompts button:hover) {
+  border-color: #18181B;
+  color: #18181B;
+}
+
+/* ─── 卡片头部（CardViewer 字符串类） ─── */
+:global(.study-card-head) {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+:global(.study-card-head span) {
+  align-self: flex-start;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: #F4F4F5;
+  color: #71717A;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.readerRightTabs{display:flex;gap:4px;background:#F4F4F5;border-radius:8px;padding:3px;margin-bottom:12px}
+.readerRightTab{flex:1;padding:6px 8px;border-radius:6px;font-size:12px;font-weight:600;background:transparent;color:#71717A;cursor:pointer;border:0}
+.readerRightTab:hover{color:#18181B}
+.readerRightTabActive{background:#fff;color:#18181B;box-shadow:0 1px 3px rgba(0,0,0,.08)}

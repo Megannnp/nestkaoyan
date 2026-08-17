@@ -4,6 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { handleAnalyzeExam } from "./analyze-exam";
 import { handleAnalyzeMistakes } from "./analyze-mistakes";
 import { handlePlanGenerate } from "./plan-generate";
+import { handleChatComplete } from "./chat-complete";
 import { handleWorkspace } from "./workspace";
 
 interface Env {
@@ -46,6 +47,10 @@ const worker = {
 
     if (url.pathname === "/api/plan-generate" && request.method === "POST") {
       return handlePlanGenerate(request, env);
+    }
+
+    if (url.pathname === "/api/chat-complete" && request.method === "POST") {
+      return handleChatComplete(request, env);
     }
 
     if (url.pathname === "/api/workspace") {

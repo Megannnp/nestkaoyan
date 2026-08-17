@@ -23,8 +23,8 @@ test.describe("Review 复盘", () => {
     await expect(page.locator(".review-metrics")).toBeVisible();
     await expect(page.getByRole("button", { name: "填写复盘" })).toBeVisible();
 
-    // 科目筛选：切换科目
-    await page.locator("select").filter({ hasText: "全部科目" }).first().selectOption({ index: 1 });
+    // 科目筛选（2026-08-01：由下拉框改为与全站一致的 Tab 风格）
+    await page.getByRole("button", { name: "全部科目", exact: true }).click();
     await page.waitForTimeout(200);
 
     // 切换月复盘 → 指标文案变化
@@ -35,13 +35,14 @@ test.describe("Review 复盘", () => {
     expectNoCriticalConsoleIssues(issues, "review-scope");
   });
 
-  test("AI 总结 + 笔记列表", async ({ page }) => {
+  test("AI 总结展示（笔记列表已随信息架构精简移除）", async ({ page }) => {
     const collector = attachConsoleCollector(page);
 
     await gotoReviewTab(page);
 
     await expect(page.getByText("AI 日复盘总结")).toBeVisible();
-    await expect(page.locator(".note-list article").first()).toBeVisible();
+    // 2026-08-01 信息架构精简：AI 总结卡片不再内嵌笔记列表，只展示总结内容
+    await expect(page.locator(".note-list")).toHaveCount(0);
 
     const issues = collector.getIssues();
     expectNoCriticalConsoleIssues(issues, "review-ai-summary");
@@ -61,7 +62,7 @@ test.describe("Review 复盘", () => {
     await inputs.nth(0).fill("E2E验收今天完成了任务A");
     await inputs.nth(1).fill("E2E验收困难部分B");
     await inputs.nth(2).fill("2 小时");
-    await inputs.nth(3).fill("优先复习热力学");
+    await inputs.nth(3).fill("优先复习马原");
     await dialog.getByRole("button", { name: "提交复盘" }).click();
 
     // Dialog 关闭

@@ -43,6 +43,7 @@ export function buildHeatmapDays(
  * 开始日期展示文案：YYYY.MM.DD（如 2026.7.30）。
  */
 export function formatHeatmapStart(start: string): string {
+  if (!start || start.length < 8 || !start.includes("-")) return "未开始";
   return `${start.split("-")[0]}.${start.split("-")[1]}.${start.split("-")[2]}`;
 }
 

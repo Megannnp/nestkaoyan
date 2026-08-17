@@ -40,6 +40,15 @@ export function sites(): Plugin {
           recursive: true,
         });
       }
+
+      // 2026-08-05：中文 PDF 文本提取依赖 pdfjs-dist 的 CMap 字符映射表（*.bcmap）。
+      // Vite 不会自动打包 node_modules 目录，需要在 build 完成后复制到客户端静态目录。
+      // 部署后 cMapUrl 使用站点根相对路径 "/cmaps/"。
+      const clientDir = resolve(root, "dist", "client");
+      const cmapSource = resolve(root, "node_modules", "pdfjs-dist", "cmaps");
+      if (await exists(cmapSource)) {
+        await cp(cmapSource, resolve(clientDir, "cmaps"), { recursive: true });
+      }
     },
   };
 }

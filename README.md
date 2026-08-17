@@ -1,53 +1,91 @@
+<p align="center">
+  <img src="public/favicon.svg" alt="筑巢考研工作台" height="72">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/授权-个人免费%20·%20商用授权-green">
+  <img src="https://img.shields.io/badge/Node.js-%3E%3D22.13-blue">
+  <img src="https://img.shields.io/badge/Stack-Next.js%2016%20·%20Cloudflare%20Workers%20·%20DeepSeek-blueviolet">
+  <img src="https://github.com/Megannnp/KaoyanPlatform/actions/workflows/ci.yml/badge.svg" alt="CI">
+</p>
+
 # 筑巢考研工作台（Kaoyan Exam Workspace）
 
-> 一套「逆向设计 × 7核 × 4层 × 6轮」的 AI 考研学习系统。
-> 目标先行 → 知识图谱 → 动态计划 → Agent 闭环，帮助备考者从「知道」到「会用」。
+> 一套「逆向设计 × 7核 × 4层 × 6轮」的 **AI 考研学习系统**：目标先行 → 知识图谱 → 动态计划 → Agent 闭环，帮助备考者从「知道」到「会用」。
 
-## 产品定位
+- 📋 **今日工作台**：每日任务、学习计时、打卡热力图
+- 🤖 **AI 学习助手**（可选）：真题分析 / 计划生成 / 对话即执行——无密钥时优雅降级为本地规则
+- 📚 **知识中心**：真题库（72 套公共课声明）+ PDF 原卷阅读（文字层选择成批注）+ 知识图谱
+- 🗂️ **成长卡片**：卡片背诵 + 复习队列（间隔重复）
+- ⚙️ **设置**：考试目标 / 科目 / AI / 学习方法 / 数据导出导入
 
-- **内核**：先看考试要什么（逆向设计），从真题抽出 7 个核心，按「理解 → 展开 → 练习 → 综合」4 层递进，整门课走「打底 → 连线 → 补漏 → 提速 → 真题 → 冲刺」6 轮
-- **支撑**：知识图谱（知识点依赖网）+ 学习者模型（每个点的掌握度快照）+ 动态计划（AI 每天推理今天该做什么）
-- **形态**：前端 React + 后端 Cloudflare Worker 全栈，数据默认存浏览器 localStorage（单机免运维）
+**数据 100% 留在本地**（浏览器 localStorage，零依赖），个人 / 非商用免费使用。
 
-## 功能模块
+> [安装说明](./INSTALL.md) · [使用说明](./USAGE.md) · [部署说明](./DEPLOY.md) · [交付清单](./CHECKLIST.md)
 
-| 模块 | 说明 |
-|------|------|
-| 今日工作台 | 每日任务、计时、学习打卡 |
-| AI 学习助手 | 自动安排学习、修改前询问、识别资料后确认 |
-| 知识中心 | 学习资料（PDF 阅读 + 批注）、知识点图谱、题目练习 |
-| 成长卡片 | 卡片背诵 + 复习队列 |
-| 学习方法 | 内置整套学习系统说明（设置 → 学习方法） |
-| 数据管理 | 本地数据导出 / 导入备份 |
+---
 
-## 技术栈（真实架构，交付时必须按此理解）
+## 为什么做筑巢考研
 
-| 层 | 技术 | 说明 |
-|----|------|------|
-| 前端 | React 19 + Next.js 16（vinext） | `app/` 目录，服务端渲染 |
-| 后端 | Cloudflare Workers（vinext Worker） | `worker/` 目录，同一部署单元 |
-| AI | DeepSeek API（服务端调用） | `worker/ai/*`，key 只在 `env.DEEPSEEK_API_KEY` 读取 |
-| 数据 | 浏览器 localStorage（默认）/ Cloudflare D1（可选） | 唯一读写入口 `app/lib/storage.ts` |
-| 构建 | Vinext（Cloudflare 全栈构建器） | `npm run build` 产出 `dist/` |
+多数考研工具要么只做题库、要么只做打卡，无法形成「学 → 练 → 复盘」闭环。筑巢考研工作台想解决的：
 
-> ⚠️ **架构约束**：本项目是 **Cloudflare Workers 全栈**（vinext 引擎），不是传统「React + Node + MySQL」。
-> 部署目标是 Cloudflare Workers（含本地/自带域名/workers.dev），不要按 VPS + Nginx + MySQL 去部署。
+- **真题驱动**：从真题抽核心考点 → 知识图谱 → 动态计划（而不是从目录页开始背书）
+- **7核4层6轮**：内置完整学习方法论，把「今天学什么」变成有依据的决策
+- **AI 真干活**：可选 DeepSeek 分析真题、生成计划、对话即执行；未配置时明确降级，不误导
+- **极简**：白卡 + 细边框 + 直接信息，专注学习本身
 
-## 快速开始（本地开发）
+## 快速开始
+
+需要 **Node.js ≥ 22.13**。
 
 ```bash
 npm install
+cp .env.example .dev.vars          # 填 DEEPSEEK_API_KEY（不填也可用，AI 降级为演示）
+npm run dev                        # http://localhost:3000
 
-# 1. 配置密钥（本地开发）
-cp .env.example .dev.vars
-# 编辑 .dev.vars，填入 DEEPSEEK_API_KEY
-
-# 2. 启动开发服务器
-npm run dev        # 默认 http://localhost:3000
-
-# 3. 构建验证（产出 dist/）
-npm run build
+# 生产构建
+npm run build                      # 产出 dist/（Cloudflare Workers 全栈）
 ```
+
+**真题 PDF（可选）**：代码内置 72 套公共课真题的声明与命名规范，PDF 文件按 [`public/papers/README.md`](./public/papers/README.md) 放置后即自动以原卷浏览 + AI 讲解。开源仓库**不含真题文件**（版权材料）。
+
+## 测试
+
+```bash
+npm run test:unit   # 单元测试（78/78）
+npm test            # 构建 + 渲染冒烟
+npx playwright test # E2E（64/64，需 dev server）
+```
+
+## 文档
+
+- [INSTALL.md](./INSTALL.md) — 安装说明书
+- [USAGE.md](./USAGE.md) — 使用说明书
+- [DEPLOY.md](./DEPLOY.md) — Cloudflare Workers 部署
+- [CHECKLIST.md](./CHECKLIST.md) — 交付前自检清单
+- [ARCHITECTURE.md](./docs/ARCHITECTURE.md) — 架构说明
+- [CHANGELOG.md](./docs/CHANGELOG.md) — 版本记录
+
+## 授权
+
+**双轨授权**：个人 / 学生 / 教育 / 非营利组织**免费**使用、修改、再分发（保留版权声明）；组织或任何**商业用途需购买商业授权**。详见 [LICENSE](./LICENSE)。
+
+© 2026 重庆语梦筑巢科技有限责任公司 · 筑巢考研工作台™
+
+## 贡献
+
+欢迎提 Issue、PR、建议。开发环境：
+
+```bash
+npm run dev         # 开发
+npm run test:unit   # 单元测试
+npm run lint        # lint
+npx playwright test # E2E
+```
+
+## License
+
+筑巢考研工作台 is dual-licensed: free for personal / non-commercial use, commercial use requires a paid license. See [LICENSE](./LICENSE).
 
 ## 测试
 

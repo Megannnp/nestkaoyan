@@ -10,7 +10,7 @@
 - [x] `npm run lint` 0 错误
 - [x] `npm test` 通过（构建 + 渲染冒烟，6/6）
 - [x] `npm run test:unit` 通过（reducer / replay / plan-generate 等，78/78）
-- [x] 关键功能自动化验证：E2E 62/62 PASS（今日工作台 / AI 助手 / 知识中心 / 成长卡片 / 设置 / 复盘 / 真题库 / Reader 阅读 / 上传）
+- [x] 关键功能自动化验证：E2E 64/64 PASS（今日工作台 / AI 助手 / 知识中心 / 成长卡片 / 设置 / 复盘 / 真题库 / Reader 阅读 / 上传）
 
 ## B. 密钥与环境（绝不入 Git）
 

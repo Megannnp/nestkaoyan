@@ -1,147 +1,34 @@
-<p align="center">
-  <img src="public/favicon.svg" alt="筑巢考研工作台" height="72">
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/授权-个人免费%20·%20商用授权-green">
-  <img src="https://img.shields.io/badge/Node.js-%3E%3D22.13-blue">
-  <img src="https://img.shields.io/badge/Stack-Next.js%2016%20·%20Cloudflare%20Workers%20·%20DeepSeek-blueviolet">
-  <img src="https://github.com/Megannnp/KaoyanPlatform/actions/workflows/ci.yml/badge.svg" alt="CI">
-</p>
-
 # 筑巢考研工作台（Kaoyan Exam Workspace）
 
-> 一套「逆向设计 × 7核 × 4层 × 6轮」的 **AI 考研学习系统**：目标先行 → 知识图谱 → 动态计划 → Agent 闭环，帮助备考者从「知道」到「会用」。
+> 一套「逆向设计 × 7核 × 4层 × 6轮」的 **AI 考研学习系统**（双轨授权：个人免费 / 商用付费）
+> 目标先行 → 知识图谱 → 动态计划 → Agent 闭环，帮助备考者从「知道」到「会用」。
 
-- 📋 **今日工作台**：每日任务、学习计时、打卡热力图
-- 🤖 **AI 学习助手**（可选）：真题分析 / 计划生成 / 对话即执行——无密钥时优雅降级为本地规则
-- 📚 **知识中心**：真题库（72 套公共课声明）+ PDF 原卷阅读（文字层选择成批注）+ 知识图谱
-- 🗂️ **成长卡片**：卡片背诵 + 复习队列（间隔重复）
-- ⚙️ **设置**：考试目标 / 科目 / AI / 学习方法 / 数据导出导入
-
-**数据 100% 留在本地**（浏览器 localStorage，零依赖），个人 / 非商用免费使用。
-
-> [安装说明](./INSTALL.md) · [使用说明](./USAGE.md) · [部署说明](./DEPLOY.md) · [交付清单](./CHECKLIST.md)
-
----
-
-## 为什么做筑巢考研
-
-多数考研工具要么只做题库、要么只做打卡，无法形成「学 → 练 → 复盘」闭环。筑巢考研工作台想解决的：
-
-- **真题驱动**：从真题抽核心考点 → 知识图谱 → 动态计划（而不是从目录页开始背书）
-- **7核4层6轮**：内置完整学习方法论，把「今天学什么」变成有依据的决策
-- **AI 真干活**：可选 DeepSeek 分析真题、生成计划、对话即执行；未配置时明确降级，不误导
-- **极简**：白卡 + 细边框 + 直接信息，专注学习本身
+- **内核**：从真题抽出核心考点，按「理解 → 展开 → 练习 → 综合」4 层递进，整门课走「打底 → 连线 → 补漏 → 提速 → 真题 → 冲刺」6 轮
+- **形态**：前端 React（Next.js 16 / vinext）+ 后端 Cloudflare Worker 全栈，数据默认 localStorage（免运维）
+- **真题**：内置 72 套公共课真题的声明与命名规范（政治 / 英语一 / 英语二 / 数学二），PDF 按规范放置即可原卷浏览 + AI 讲解
 
 ## 快速开始
 
-需要 **Node.js ≥ 22.13**。
+代码与完整文档在 [`workspace-app/`](./workspace-app)：
 
 ```bash
+cd workspace-app
 npm install
-cp .env.example .dev.vars          # 填 DEEPSEEK_API_KEY（不填也可用，AI 降级为演示）
-npm run dev                        # http://localhost:3000
-
-# 生产构建
-npm run build                      # 产出 dist/（Cloudflare Workers 全栈）
-```
-
-**真题 PDF（可选）**：代码内置 72 套公共课真题的声明与命名规范，PDF 文件按 [`public/papers/README.md`](./public/papers/README.md) 放置后即自动以原卷浏览 + AI 讲解。开源仓库**不含真题文件**（版权材料）。
-
-## 测试
-
-```bash
-npm run test:unit   # 单元测试（78/78）
-npm test            # 构建 + 渲染冒烟
-npx playwright test # E2E（64/64，需 dev server）
+cp .env.example .dev.vars      # 填 DEEPSEEK_API_KEY（可选）
+npm run dev                    # http://localhost:3000
+npm run build                  # 生产构建（产出 dist/）
 ```
 
 ## 文档
 
-- [INSTALL.md](./INSTALL.md) — 安装说明书
-- [USAGE.md](./USAGE.md) — 使用说明书
-- [DEPLOY.md](./DEPLOY.md) — Cloudflare Workers 部署
-- [CHECKLIST.md](./CHECKLIST.md) — 交付前自检清单
-- [ARCHITECTURE.md](./docs/ARCHITECTURE.md) — 架构说明
-- [CHANGELOG.md](./docs/CHANGELOG.md) — 版本记录
-
-## 授权
-
-**双轨授权**：个人 / 学生 / 教育 / 非营利组织**免费**使用、修改、再分发（保留版权声明）；组织或任何**商业用途需购买商业授权**。详见 [LICENSE](./LICENSE)。
-
-© 2026 重庆语梦筑巢科技有限责任公司 · 筑巢考研工作台™
-
-## 贡献
-
-欢迎提 Issue、PR、建议。开发环境：
-
-```bash
-npm run dev         # 开发
-npm run test:unit   # 单元测试
-npm run lint        # lint
-npx playwright test # E2E
-```
-
-## License
-
-筑巢考研工作台 is dual-licensed: free for personal / non-commercial use, commercial use requires a paid license. See [LICENSE](./LICENSE).
-
-## 测试
-
-```bash
-npm run lint          # ESLint
-npm test              # 构建 + 渲染冒烟
-npm run test:unit     # 单元测试（reducer/replay/plan-generate 等）
-npm run test:e2e      # Playwright E2E（需先本地 dev server）
-```
-
-## 目录结构（产品包布局）
-
-```
-workspace-app/
-├── app/                  # 前端 React（页面 + 组件 + 状态）
-│   ├── components/       #   UI 组件（Sidebar/ReaderPanel/ChatPanel 等）
-│   └── lib/              #   状态管理/reducer/storage/类型/AI 客户端层
-├── worker/               # 后端 Cloudflare Worker（AI 路由 + API）
-│   └── ai/               #   DeepSeek 调用实现（analyze-exam/plan-generate 等）
-├── db/ + drizzle/        # Drizzle schema 与 SQL 迁移（D1 可选）
-├── styles/               # CSS Modules（components/workspace）
-├── tests/                # 单测 + E2E（Playwright）
-├── .env.example          # 环境变量模板（无密钥）
-├── DEPLOY.md             # 部署文档
-├── CHECKLIST.md          # 部署前检查清单
-└── package.json          # 脚本与依赖
-```
+- [README](./workspace-app/README.md) · [安装](./workspace-app/INSTALL.md) · [使用](./workspace-app/USAGE.md)
+- [部署](./workspace-app/DEPLOY.md) · [交付自检](./workspace-app/CHECKLIST.md) · [架构](./workspace-app/docs/ARCHITECTURE.md)
 
 ## 开源说明
 
-- **许可证**：本项目以 **MIT License** 开源（见仓库根 `LICENSE`）。可自由使用、修改、商用，保留版权声明即可。
-- **贡献**：欢迎提交 Issue / PR。请先跑通 `npm run lint`、`npm run test:unit`、`npx playwright test`（E2E）再提交。
-- **代码结构**见上方目录树；**部署**见 [DEPLOY.md](./DEPLOY.md)；**交付自检**见 [CHECKLIST.md](./CHECKLIST.md)。
+- **授权**：双轨——个人 / 学生 / 教育 / 非营利**免费**使用、修改、再分发（保留版权声明）；**商用需购买授权**。详见 [LICENSE](./LICENSE)。
+- **真题 PDF 不含在仓库**（版权材料，见 `workspace-app/public/papers/README.md` 放置规范）
+- **测试**：单元 78/78 ✅ · E2E 64/64 ✅（Playwright）
 
-## 真题 PDF（版权材料）
+© 2026 重庆语梦筑巢科技有限责任公司 · 筑巢考研工作台™
 
-> ⚠️ **开源仓库不含真题 PDF**（版权材料 + 体积约 209MB）。代码内置了 **72 套公共课真题的声明与命名规范**（政治 24 / 英语一 16 / 英语二 16 / 数学二 16），但**文件需自行放置**：
-
-```bash
-# 1. 准备带文本层（可复制/搜索）的真题 PDF，按规范命名
-#    政治  -> public/papers/politics-YYYY.pdf（2003-2026）
-#    英语一-> public/papers/english-YYYY.pdf（2010-2025）
-#    英语二-> public/papers/english2-YYYY.pdf（2010-2025）
-#    数学二-> public/papers/math2-YYYY.pdf（2010-2025）
-
-# 2. 放入目录即自动以原卷浏览（详见 public/papers/README.md）
-```
-
-放置后 `npm run build` 即可在阅读器中原卷浏览 + AI 讲解（需配置 `DEEPSEEK_API_KEY`）。
-
-## 数据说明
-
-- 当前默认数据保存在**浏览器 localStorage**（key: `nest-exam-workspace-v5`），无需数据库即可运行
-- 需要**多端同步 / 后台统一管理**时：启用 Cloudflare D1（见 `.env.example` 与 DEPLOY.md「可选：启用 D1」）
-- 用户可随时在「设置 → 数据管理」导出/导入完整学习档案（JSON 备份）
-
-## License
-
-MIT License（见仓库根 `LICENSE`）。

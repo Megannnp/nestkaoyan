@@ -29,6 +29,9 @@ yarn-error.log*
 .pnpm-debug.log*
 .npm-cache/
 
+# pdfjs cmaps（dev 时由 build/sites-vite-plugin.ts 从 node_modules 复制，不入库）
+/public/cmaps/
+
 # env files (can opt-in for committing if needed)
 .env*
 # 例外：.env.example 是环境变量模板（无密钥），需要随产品包提交

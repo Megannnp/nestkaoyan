@@ -20,9 +20,18 @@ export function sites(): Plugin {
 
   return {
     name: "sites",
-    apply: "build",
     configResolved(config) {
       root = config.root;
+    },
+    async buildStart() {
+      // 2026-08-18：pdf.js 渲染 CJK（UniGB-UCS2-H 等）PDF 需 cmaps/*.bcmap。
+      // build 后由 closeBundle 复制到 dist/client，但 dev server（e2e 依赖）只服务 public/，
+      // 因此在启动时复制到 public/cmaps/（已被 .gitignore 排除，不入库）。
+      const cmapSource = resolve(root, "node_modules", "pdfjs-dist", "cmaps");
+      const pubCmap = resolve(root, "public", "cmaps");
+      if ((await exists(cmapSource)) && !(await exists(pubCmap))) {
+        await cp(cmapSource, pubCmap, { recursive: true });
+      }
     },
     async closeBundle() {
       const outputDirectory = resolve(root, "dist", ".openai");

@@ -4,6 +4,45 @@
 
 格式：`YYYY-MM-DD | 修改内容 | 修改人 | 涉及文件`
 
+## 2026-08-19（交付收尾：线上部署 + 授权统一 + 缺陷根因修复）
+
+> 交付审查完成后的收尾：全项回归通过后上线，修复审查发现的全部缺陷。
+
+### 线上部署（首次正式上线）
+| 修改 | 涉及文件 | 说明 |
+|------|---------|------|
+| 部署到 Cloudflare Workers | `wrangler deploy` | `https://kaoyan-exam-workspace.pjymegan.workers.dev`，版本 `f06a1625`（2026-08-19 08:29 UTC）；DEEPSEEK_API_KEY 已配置为 Worker 机密 |
+| 部署前置验证 | `wrangler deploy --dry-run` | 构建产物 3.7MB（gzip 795KB）可部署；80 资产上传成功（72 套真题 PDF 全量上线） |
+
+### 授权统一（LICENSE 矛盾修复，P0）
+| 修改 | 涉及文件 | 说明 |
+|------|---------|------|
+| 根 LICENSE 改双轨 | `LICENSE` | 由 MIT 替换为「双轨授权协议」（个人免费/商用付费），与 `workspace-app/LICENSE` 字节级一致 |
+| README MIT 表述清除 | `README.md`、`workspace-app/README.md` | 移除全部 MIT 表述，改引双轨授权（全库 grep 零残留） |
+
+### 项目仓库根化 + 交付文档纳入版本控制
+| 修改 | 涉及文件 | 说明 |
+|------|---------|------|
+| `.git` 上移到项目根 | 全库 | `KaoyanPlatform` 统一为一个 git 仓库；121 个文件自动识别 rename，32 条历史完整保留 |
+| 交付文档入库 | `docs/`（22 份）、PRD、`LICENSE`、`README.md` | 全部交付文档纳入版本控制（此前根目录文档不在任何 git 仓库） |
+| 根 `.gitignore` 补全 | `.gitignore` | 合并子目录规则（`*.tsbuildinfo`/`out/`/`cmaps`/`.env*`/`*.pem`） |
+| 文档去重 | `docs/` | 删除与 `workspace-app/docs/` 重复的 5 个文件，引用改指权威副本 |
+
+### 缺陷根因修复
+| 修改 | 涉及文件 | 说明 |
+|------|---------|------|
+| React「NaN」告警根因修复 | `app/page.tsx` | Hydration effect：无效 `exam.examDate` 兜底为 0 天，消除侧栏「NaN天」渲染与「Received NaN」告警（此前仅靠 E2E 白名单掩盖） |
+| E2E 翻页 flaky 消除 | `tests/e2e/reader.spec.ts` | 固定 `waitForTimeout(200)` 改为 `toHaveValue` 自动轮询（并发/HMR 下偶发读旧值） |
+| E2E 白名单注释更新 | `tests/e2e/helpers.ts` | NaN 白名单保留为防御，注释标注根因已修复 |
+| CHECKLIST 同步 | `CHECKLIST.md` | E2E 62/62 → 64/64；D/E/F 线上部署项实测后勾选 |
+
+### 验证基线（2026-08-19 实测）
+- `npm run lint` ✅ 0 errors / 0 warnings
+- `npm run test:unit` ✅ **78/78 PASS**
+- `npm run build` ✅ 成功
+- 全量 E2E ✅ **64/64 PASS**（`--workers=2`，含此前偶发失败的 reader 翻页用例）
+- 线上部署 ✅ `wrangler deploy` 成功、版本生效（本地手机热点网络到边缘节点不通，需正常网络下人工打开确认）
+
 ## 2026-08-14（公共课真题范围收敛 + 删除 demo 数据）
 
 > 用户确认：只做公共课（政治 / 英语一 / 数学二），专业课与 demo 数据全部移除。

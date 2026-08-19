@@ -52,9 +52,9 @@ npm run build                      # 产出 dist/（Cloudflare Workers 全栈）
 ## 测试
 
 ```bash
-npm run test:unit   # 单元测试（78/78）
+npm run test:unit   # 单元测试（79/79）
 npm test            # 构建 + 渲染冒烟
-npx playwright test # E2E（64/64，需 dev server）
+npx playwright test # E2E（68/68，需 dev server）
 ```
 
 ## 文档

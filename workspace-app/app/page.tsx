@@ -24,6 +24,7 @@ import { buildReviewSubjects, reviewMinutesOf, reviewCompletedCount, reviewMaste
 import { migrateLegacyChat } from "./lib/chat";
 import styles from "../styles/workspace.module.css";
 import { Sidebar } from "./components/Sidebar";
+import { MobileNav } from "./components/MobileNav";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { ReviewDialog } from "./components/ReviewDialog";
 import { OnboardingWizard } from "./components/OnboardingWizard";
@@ -649,6 +650,8 @@ export default function Home() {
         onCellMouseEnter={onCellMouseEnter} onCellMouseLeave={onCellMouseLeave} onCellClick={onCellClick}
         setTooltipVisible={setTooltipVisible} setTooltipData={setTooltipData}
       />
+      {/* 移动端（<lg）底部导航：Sidebar 在 <1024px 隐藏，需独立导航入口（2026-08-19） */}
+      <MobileNav activeView={activeView} setActiveView={setActiveView} />
 
       <div className={styles.mainContent} data-testid={appReady ? "app-ready" : "app-booting"} aria-busy={!appReady}>
         {/* ─── Dashboard ─── */}

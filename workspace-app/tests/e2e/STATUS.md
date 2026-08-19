@@ -1,10 +1,11 @@
 # Playwright E2E Test Status
 
-> 状态：**2026-08-17 全量 64/64 PASS**（实测与静态计数一致；含数据导出/导入用例）
+> 状态：**2026-08-19 全量 68/68 PASS**（实测与静态计数一致；含数据导出/导入、Onboarding、移动端导航用例）
 
 ## 当前状态
-- **结构统计（2026-08-17 实核）：64 个 test()**，分布于 8 个 spec：cards 12 / dashboard 14 / flows 5 / knowledge 8 / questions 6 / reader 10 / review 5 / settings **4**（含数据导出/导入；2026-08-17 实测 64/64 PASS，与静态统计一致）
-- **2026-08-17 全量回归 64/64 PASS**（实测，含导出 JSON 备份 / 导入 JSON 恢复用例）
+- **结构统计（2026-08-19 实核）：68 个 test()**，分布于 9 个 spec：cards 12 / dashboard 14 / flows 5 / knowledge 8 / questions 6 / reader 10 / review 5 / settings 4 / **ui-smoke 2 + ui-mobile 2**（2026-08-19 实测 68/68 PASS，与静态统计一致）
+- **2026-08-19 全量回归 68/68 PASS**（实测；新增：UI 细节冒烟「无 NaN/溢出/各 Tab 渲染」「Onboarding 向导」+ 响应式「375px 移动视口无横向溢出」「静态资源与 404」）
+- **2026-08-19 移动端导航修复**：新增 MobileNav（<lg 固定底部导航栏）——此前 Sidebar `hidden lg:flex` 导致手机/平板无导航入口、核心功能不可达（E2E freshState 在 375px 视口下因「知识中心」按钮不可见而失败，现已通过）
 - **2026-08-14：E2E 种子已切换为公共课**（政治 / 英语一 / 数学二）——移除全部「828 物理化学」「傅献彩」引用；
   - `e2e-seed.ts` 注入政治测试卡片、**政治知识点、政治+英语一测试任务**（支撑卡片/知识图谱/Dashboard 任务用例）；
   - 科目 Tab / 上传 / 设置删除用例改指政治；傅献彩意图用例改为「Agent 跳转沉淀卡片复习」；

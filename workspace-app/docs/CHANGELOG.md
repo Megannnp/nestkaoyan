@@ -36,6 +36,15 @@
 | E2E 白名单注释更新 | `tests/e2e/helpers.ts` | NaN 白名单保留为防御，注释标注根因已修复 |
 | CHECKLIST 同步 | `CHECKLIST.md` | E2E 62/62 → 64/64；D/E/F 线上部署项实测后勾选 |
 
+### 移动端可用性修复（全面审查发现，P1）
+| 修改 | 涉及文件 | 说明 |
+|------|---------|------|
+| 新增移动端底部导航 | `app/components/MobileNav.tsx`（新） | 此前 Sidebar `hidden lg:flex`（<1024px 完全隐藏）且无替代导航 → 手机/平板无法访问知识中心/沉淀卡片/设置等核心功能（P1）。现新增 `<lg` 固定底部导航栏，5 个一级入口与 Sidebar 同源 |
+| 挂载 MobileNav | `app/page.tsx` | Sidebar 之后渲染，复用 activeView/setActiveView |
+| 移动端布局适配 | `styles/workspace.module.css` | `@media (max-width: 1023px)` 移除 mainContent 288px 左留白、收紧边距、底部留白 76px |
+| heatmap 无效日期守卫 | `app/lib/heatmap.ts`、`tests/heatmap.test.mts` | `monBasedOffsetOf` 无效日期返回 0 而非 NaN（防 NaN 传播，+1 单测） |
+| 新增 E2E | `tests/e2e/ui-smoke.spec.ts`、`tests/e2e/ui-mobile.spec.ts`（新） | UI 细节冒烟（无 NaN/溢出/各 Tab/Onboarding）+ 响应式（375px 无横向溢出/静态资源/404），补上 Onboarding 与移动端两个测试盲区 |
+
 ### 验证基线（2026-08-19 实测）
 - `npm run lint` ✅ 0 errors / 0 warnings
 - `npm run test:unit` ✅ **78/78 PASS**

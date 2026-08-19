@@ -49,8 +49,11 @@ export function formatHeatmapStart(start: string): string {
 
 /**
  * 周一起始偏移：星期日=6，星期一~六=0~5。
+ * 无效日期（如空字符串/未设置 startDate）→ 返回 0（避免 NaN 传播）。
  */
 export function monBasedOffsetOf(start: string): number {
+  const startTime = new Date(start).getTime();
+  if (!Number.isFinite(startTime)) return 0;
   const startDayOfWeek = new Date(start).getDay();
   return startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
 }

@@ -43,6 +43,12 @@ test("monBasedOffsetOf：周一对齐偏移（周日=6，其余=星期-1）", ()
   assert.equal(monBasedOffsetOf("2026-08-02"), 6);
 });
 
+test("monBasedOffsetOf：无效日期 → 0（不返回 NaN）", () => {
+  assert.equal(monBasedOffsetOf(""), 0);
+  assert.equal(monBasedOffsetOf("invalid"), 0);
+  assert.equal(Number.isNaN(monBasedOffsetOf("")), false);
+});
+
 test("buildHeatmapGrid：周一为首列，首行留空，月份标签合并", () => {
   const { days } = buildHeatmapDays("2026-07-30", "2026-08-05", []);
   // 2026-07-30=周四，offset=3 → 首行 3 格空

@@ -1,6 +1,6 @@
 # 第五轮完成度审查报告（REVIEW_v4）— 2026-08-02
 
-> 依据：docs/TODO.md（2026-08-01）、docs/CHANGELOG.md、docs/FUNCTIONAL_ACCEPTANCE_REPORT.md、docs/FEATURE_INVENTORY.md
+> 依据：docs/TODO.md（2026-08-01）、workspace-app/docs/CHANGELOG.md、docs/FUNCTIONAL_ACCEPTANCE_REPORT.md、docs/FEATURE_INVENTORY.md
 > 方法：静态代码审计 + 现有测试套件实跑（tsc / 单测）+ 文档-代码一致性核对
 > 本报告**不修改业务代码**，仅记录证据并给出后续 TODO 排序。
 
@@ -69,7 +69,7 @@
 | # | 位置 | 文档声称 | 代码实际 | 建议 |
 |---|---|---|---|---|
 | 3.1 | tests/e2e/STATUS.md | 52/52（08-01 16:32） | **64 个 test()**（含 settings.spec 1 个） | 重新全量回归后更新为最新数字；`STATUS.md` 与 CHANGELOG 各自声称 52 / 54 也不一致 |
-| 3.2 | docs/CHANGELOG.md | 单测 38/38（08-01） | 44/44（已有 analyze-exam 6 项） | 更新最新单测计数 |
+| 3.2 | workspace-app/docs/CHANGELOG.md | 单测 38/38（08-01） | 44/44（已有 analyze-exam 6 项） | 更新最新单测计数 |
 | 3.3 | docs/TODO.md | 「storageVersion=6」已升 | storage-contract-1c 测试断言文案仍写 v5（`校验 storageVersion=5`） | 测试文案/注释同步 v6（逻辑本身兼容 v5 key 名，无需改行为） |
 | 3.4 | docs/TODO.md | 「page.tsx 已拆分」印象 | 3137 行（仍为上帝组件） | 如实标注为 P1 持续项 |
 
@@ -80,7 +80,7 @@
 > 用户已确认优先级原则：每轮只推进一项，避免同时展开。
 
 ### P0（文档可信度，先清）
-- [ ] 重跑全量 E2E（`npx playwright test --workers=2`），以真实数字更新 `tests/e2e/STATUS.md`、`docs/CHANGELOG.md`、`docs/TODO.md`（当前 52/54/64 三处数字不一致）
+- [ ] 重跑全量 E2E（`npx playwright test --workers=2`），以真实数字更新 `tests/e2e/STATUS.md`、`workspace-app/docs/CHANGELOG.md`、`docs/TODO.md`（当前 52/54/64 三处数字不一致）
 - [ ] 同步 storage-contract-1c 测试文案的 storageVersion v5→v6（仅文案，不改行为）
 
 ### P1（可维护性）

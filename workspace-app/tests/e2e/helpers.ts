@@ -56,8 +56,9 @@ const IGNORED_PATTERNS: { category: ConsoleCategory; patterns: RegExp[] }[] = [
       /SharedArrayBuffer/i,
       /Deprecated/i,
       /Password Manager/i,
-      // React 19 对「空态渲染 NaN 数字」的内部告警：渲染结果为空、不影响功能，非应用逻辑错误。
-      // 2026-08-17 记录：reload 后首帧空态渲染触发（组件栈不可得，渲染为空）；归为环境噪音，待 React 升级或专项排查。
+      // React 19「空态渲染 NaN 数字」内部告警：渲染结果为空、不影响功能，非应用逻辑错误。
+      // 2026-08-18 已修复根因（page.tsx Hydration effect：无效 exam.examDate 兜底为 0，不再产生 NaN）。
+      // 保留本条目作为防御性噪音过滤，若未来出现其他 NaN 渲染源应先定位根因而非依赖此白名单。
       /Received NaN for the .* attribute/i,
     ],
   },

@@ -32,9 +32,8 @@ test.describe("Reader 阅读器", () => {
     const pageBefore = await pageInput.inputValue();
 
     await page.getByRole("button", { name: "下一页 ›" }).click();
-    await page.waitForTimeout(200);
-    const pageAfter = await pageInput.inputValue();
-    expect(pageAfter).not.toBe(pageBefore);
+    // 用 toHaveValue 自动轮询等待页码变化（固定 waitForTimeout 在并发/HMR 下偶发读旧值，导致 flaky）
+    await expect(pageInput).not.toHaveValue(pageBefore);
 
     const issues = collector.getIssues();
     expectNoCriticalConsoleIssues(issues, "reader-page-nav");

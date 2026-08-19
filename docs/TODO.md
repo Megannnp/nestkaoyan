@@ -310,4 +310,4 @@
 ## 已知说明（E2E 回归约定）
 
 - [x] **默认回归方式**：`npx playwright test --workers=2`；4 workers 并行存在 Vite HMR 导航竞态，随机失败不视为业务回归。
-- 相关修复记录见 `docs/CHANGELOG.md`（2026-08-01 条目）。
+- 相关修复记录见 `workspace-app/docs/CHANGELOG.md`（2026-08-01 条目）。

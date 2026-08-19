@@ -309,7 +309,13 @@ export default function Home() {
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setHydratedTodayStr(dateOnly());
-    setHydratedDaysLeft(Math.max(0, Math.ceil((new Date(exam.examDate).getTime() - Date.now()) / 86400000)));
+    // 2026-08-18 修复：初始 exam.examDate 为空字符串时 new Date("").getTime()=NaN，
+    // Math.max(0, NaN)=NaN → 侧栏渲染「NaN天」并触发 React「Received NaN」告警。
+    // 无效日期兜底为 0 天（用户设置考试日期后 effect 随依赖变化重新计算）。
+    const examDateMs = new Date(exam.examDate).getTime();
+    setHydratedDaysLeft(Number.isNaN(examDateMs)
+      ? 0
+      : Math.max(0, Math.ceil((examDateMs - Date.now()) / 86400000)));
   }, [exam.examDate]);
 
   // ─── LearningEvent: load v4 events on mount (Sprint 1 / Phase A) ───

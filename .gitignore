@@ -48,6 +48,9 @@ workspace-app/test-results/
 workspace-app/kaoyan.log
 workspace-app/papers/
 
+# 本地交付包产物
+nestkaoyan-v*.tar.gz
+
 # 系统/编辑器
 .DS_Store
 *.log

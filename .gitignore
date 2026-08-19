@@ -44,6 +44,10 @@ workspace-app/examples/
 workspace-app/playwright-report/
 workspace-app/test-results/
 
+# 一键脚本运行日志 + Docker 挂载的真题目录
+workspace-app/kaoyan.log
+workspace-app/papers/
+
 # 系统/编辑器
 .DS_Store
 *.log

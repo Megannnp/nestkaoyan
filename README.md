@@ -9,14 +9,22 @@
 
 ## 快速开始
 
-代码与完整文档在 [`workspace-app/`](./workspace-app)：
+代码与完整文档在 [`workspace-app/`](./workspace-app)。三种安装方式任选（详见 [安装说明](./workspace-app/INSTALL.md)）：
+
+| 方式 | 命令 |
+|---|---|
+| **Docker 一键**（推荐新手） | `cd workspace-app && docker compose up -d` |
+| **双击脚本**（mac/Windows） | 双击 `install.command` / `install.bat` |
+| **开发者手动** | `cd workspace-app && npm install && npm run dev` |
 
 ```bash
+# 开发者手动（Node.js ≥ 22.13）
 cd workspace-app
 npm install
-cp .env.example .dev.vars      # 填 DEEPSEEK_API_KEY（可选）
+cp .env.example .dev.vars      # 填 DEEPSEEK_API_KEY（可选，不填 AI 降级为演示）
 npm run dev                    # http://localhost:3000
 npm run build                  # 生产构建（产出 dist/）
+npm run deploy                 # 上线 Cloudflare Workers
 ```
 
 ## 文档

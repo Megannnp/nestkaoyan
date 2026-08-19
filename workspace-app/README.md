@@ -6,6 +6,7 @@
   <img src="https://img.shields.io/badge/授权-个人免费%20·%20商用授权-green">
   <img src="https://img.shields.io/badge/Node.js-%3E%3D22.13-blue">
   <img src="https://img.shields.io/badge/Stack-Next.js%2016%20·%20Cloudflare%20Workers%20·%20DeepSeek-blueviolet">
+  <img src="https://img.shields.io/badge/安装-Docker%20一键%20·%20双击脚本%20·%20npm-orange">
   <img src="https://github.com/Megannnp/KaoyanPlatform/actions/workflows/ci.yml/badge.svg" alt="CI">
 </p>
 
@@ -36,16 +37,15 @@
 
 ## 快速开始
 
-需要 **Node.js ≥ 22.13**。
+三种安装方式，选一个即可（详见 [INSTALL.md](./INSTALL.md)）：
 
-```bash
-npm install
-cp .env.example .dev.vars          # 填 DEEPSEEK_API_KEY（不填也可用，AI 降级为演示）
-npm run dev                        # http://localhost:3000
+| 方式 | 适合谁 | 怎么装 |
+|---|---|---|
+| **A. Docker 一键** | 任何人（尤其 Windows） | `docker compose up -d` → http://localhost:3000 |
+| **B. 双击脚本** | macOS / Windows 用户 | 双击 `install.command`（Mac）/ `install.bat`（Win） |
+| **C. 开发者手动** | 想改代码 | `npm install` → `npm run dev`（需 Node ≥ 22.13） |
 
-# 生产构建
-npm run build                      # 产出 dist/（Cloudflare Workers 全栈）
-```
+**数据 100% 留在本机浏览器 localStorage**（零数据库、断网可用），个人 / 非商用免费使用。
 
 **真题 PDF（可选）**：代码内置 72 套公共课真题的声明与命名规范，PDF 文件按 [`public/papers/README.md`](./public/papers/README.md) 放置后即自动以原卷浏览 + AI 讲解。开源仓库**不含真题文件**（版权材料）。
 

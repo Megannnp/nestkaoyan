@@ -45,7 +45,19 @@
 | heatmap 无效日期守卫 | `app/lib/heatmap.ts`、`tests/heatmap.test.mts` | `monBasedOffsetOf` 无效日期返回 0 而非 NaN（防 NaN 传播，+1 单测） |
 | 新增 E2E | `tests/e2e/ui-smoke.spec.ts`、`tests/e2e/ui-mobile.spec.ts`（新） | UI 细节冒烟（无 NaN/溢出/各 Tab/Onboarding）+ 响应式（375px 无横向溢出/静态资源/404），补上 Onboarding 与移动端两个测试盲区 |
 
+### 安装分发增强（开源化，对齐 NestLife 模式）
+| 修改 | 涉及文件 | 说明 |
+|------|---------|------|
+| Docker 一键运行 | `Dockerfile`、`docker-compose.yml`、`.dockerignore`（新） | 多阶段构建（deps→builder→runner）；`docker compose up -d` 即跑；真题 PDF 经卷挂载 `./papers:/app/public/papers`，版权材料不入镜像 |
+| macOS 一键脚本 | `install.command`（新） | 双击即装：检查/安装 Node → `npm ci` → `build` → `start` → 打开浏览器 |
+| Windows 一键脚本 | `install.bat`（新） | 同上（Windows 版，含错误提示） |
+| 手把手安装文档 | `INSTALL.md` | 重写为分级大白话：路 A Docker / 路 B 双击脚本 / 路 C 开发者手动，每步带 ✅/❌ 与常见问题 |
+| README 安装矩阵 | `README.md`（根+应用） | 三种安装方式对照 + Docker badge |
+| .gitignore 补充 | `.gitignore` | 忽略 `kaoyan.log`、Docker 挂载目录 `papers/` |
+
 ### 验证基线（2026-08-19 实测）
+- `bash -n install.command` ✅ 语法通过；Dockerfile 引用文件全部存在 ✅
+- 本机无 Docker（未能本地构建镜像）；Dockerfile 为多阶段标准模式，构建与运行步骤对应 `npm ci/build/start`（均已本地实测通过）
 - `npm run lint` ✅ 0 errors / 0 warnings
 - `npm run test:unit` ✅ **78/78 PASS**
 - `npm run build` ✅ 成功

@@ -1,37 +1,156 @@
-# 安装说明（INSTALL.md）
+# 筑巢考研工作台 · 安装说明书（手把手版）
 
-## 前置要求
+> 跟着做就行，大约 10 分钟跑起来。数据默认存在**你自己浏览器的 localStorage**（零外部数据库），断网也能用。
+> 完全不想碰命令行？选 **路 A（Docker Desktop，图形界面）**，或请懂电脑的朋友帮忙双击一键脚本。
 
-- **Node.js ≥ 22.13**（本地开发 / 构建）
+---
 
-## 本地开发
+## 0. 先选一条路
+
+| 选择 | 适合谁 | 你要装什么 |
+|---|---|---|
+| **A. Docker 一键**（最省事） | 任何人，尤其是 Windows 用户 | Docker Desktop（图形界面） |
+| **B. 一键脚本** | macOS / Windows，会双击文件 | Node.js ≥ 22.13 |
+| **C. 开发者手动** | 想改代码 / 二次开发 | Node.js ≥ 22.13 + git |
+
+> ⚠️ 需要 **Node.js ≥ 22.13**（路 B/C）或 **Docker**（路 A，已内置 Node 环境）。
+
+---
+
+## 路 A：Docker 一键（推荐新手）
+
+### A1. 安装 Docker Desktop
+
+1. 打开 `docker.com/products/docker-desktop`，下载你系统的安装包
+2. 双击安装，装完打开 Docker Desktop（首次可能提示登录/授权，允许即可）
+3. 等右上角图标变绿（鲸鱼不再转圈）——Docker 就绪
+
+> ✅ Docker Desktop 图标正常、显示 "running"。
+> ❌ 装不上？改选 **路 B**。
+
+### A2. 启动筑巢考研
+
+打开终端（Windows: 按 `Win` 搜 `cmd`；macOS: 启动台→其他→终端），进到项目文件夹后运行：
 
 ```bash
+cd 你的项目文件夹路径
+docker compose up -d
+```
+
+首次会自动构建镜像（约 3~5 分钟，之后秒开）。
+
+> ✅ 出现 `Started` 或 `Container ... Started`。
+> ❌ 报错？贴日志到 Issue，或 `docker compose down && docker compose up -d --build` 重试。
+
+### A3. 打开使用
+
+浏览器访问 **http://localhost:3000**
+
+> 💡 真题 PDF：放到项目里新建的 `papers/` 文件夹（与 `public/papers/README.md` 的命名规范一致），刷新即自动出现。
+
+---
+
+## 路 B：一键脚本（macOS / Windows）
+
+### B1. 安装 Node.js
+
+1. 打开 `nodejs.org`，下载 **LTS** 版本
+2. 双击安装，一路"下一步"
+3. 验证：打开终端，运行 `node -v`
+
+> ✅ 显示 `v22.13.0` 或更高。
+> ❌ 提示"找不到命令"？重装一遍 LTS，或改走 **路 A**。
+
+### B2. 双击一键脚本
+
+| 系统 | 双击 |
+|---|---|
+| macOS | `install.command`（首次若提示"无法打开"，右键→打开） |
+| Windows | `install.bat` |
+
+脚本自动完成：检查 Node → 装依赖 → 构建 → 启动 → 打开浏览器。
+
+> ✅ 看到「🎉 安装完成！」并自动打开 http://localhost:3000。
+> ❌ 窗口一闪而过？右键脚本→用终端/命令提示符打开，看报错。
+
+### B3. 常用命令（手动重启）
+
+```bash
+# 重新构建 + 启动
+npm run build
+npm run start          # 默认 http://localhost:3000（可 PORT=3100 npm run start 换端口）
+```
+
+---
+
+## 路 C：开发者手动
+
+```bash
+# 1. 装依赖
 npm install
-cp .env.example .dev.vars   # 可选：填 DEEPSEEK_API_KEY（不填则 AI 降级为演示）
-npm run dev                 # http://localhost:3000
+
+# 2.（可选）配置 AI：cp .env.example .dev.vars 并填入你的 DeepSeek key
+#    不填也能用——AI 功能诚实降级为「演示回复」，不误导。
+
+# 3. 开发模式（热更新）
+npm run dev             # http://localhost:3000
+
+# 4. 生产构建 + 本地预览
+npm run build
+npm run start
 ```
 
-## 生产构建
+**测试**：
 
 ```bash
-npm run build               # 产出 dist/（Cloudflare Workers 全栈，含自动生成的 wrangler.json）
-npm run start               # 本地预览生产版
+npm run lint            # ESLint（0 错误）
+npm run test:unit       # 单元测试（79/79）
+npm test                # 构建 + 渲染冒烟
+npx playwright test     # E2E（68/68，需先启动 dev server）
 ```
 
-## 真题 PDF（可选）
+---
 
-1. 准备带文本层的真题 PDF（可复制/搜索），按 [`public/papers/README.md`](./public/papers/README.md) 命名放入 `public/papers/`；
-2. 重新 `npm run build`，阅读器中即自动以原卷浏览。
+## 真题 PDF（可选，版权材料）
 
-## 部署
-
-见 [DEPLOY.md](./DEPLOY.md)（Cloudflare Workers：`wrangler login` → `wrangler secret put DEEPSEEK_API_KEY` → `npm run deploy`）。
-
-## 测试
+代码内置 **72 套公共课真题的声明与命名规范**（政治 24 / 英语一 16 / 英语二 16 / 数学二 16），但 **PDF 文件需自行放置**（版权材料，不入仓库、不入镜像）：
 
 ```bash
-npm run test:unit           # 单元测试
-npm test                    # 构建 + 渲染冒烟
-npx playwright test         # E2E（需 dev server，默认 localhost:3000）
+# 命名规范（详见 public/papers/README.md）
+#   政治  -> public/papers/politics-YYYY.pdf（2003-2026）
+#   英语一-> public/papers/english-YYYY.pdf（2010-2025）
+#   英语二-> public/papers/english2-YYYY.pdf（2010-2025）
+#   数学二-> public/papers/math2-YYYY.pdf（2010-2025）
 ```
+
+- **路 A**：放到项目根 `papers/`（docker 卷已挂载）
+- **路 B/C**：放到 `public/papers/`，然后重新 `npm run build` 或重启
+- 没有 PDF 也能正常使用：上传自己的资料（PDF/DOCX/TXT/MD/图片）即可
+
+---
+
+## 上线到公网（可选）
+
+需要手机随时访问 / 给朋友用？部署到 **Cloudflare Workers**（全球网络，免费额度充足）：
+
+```bash
+npm run build
+npx wrangler login
+npx wrangler secret put DEEPSEEK_API_KEY   # 填你的 key（可选）
+npm run deploy
+```
+
+详细步骤与排错见 [DEPLOY.md](./DEPLOY.md)。
+
+---
+
+## 常见问题
+
+| 问题 | 解决 |
+|---|---|
+| 端口被占用 | 换端口：`PORT=3100 npm run start`（路 B）或改 docker-compose.yml 的 `3000:3000` 为 `3100:3000` |
+| 手机打不开电脑的 localhost | 手机连同一 WiFi，访问 `http://电脑IP:3000`（macOS 终端 `ipconfig getifaddr en0` 查 IP） |
+| AI 提示"演示回复" | 在「设置 → AI 学习助手」填入你的 DeepSeek key（key 只存本机） |
+| 数据会丢吗 | 数据在浏览器 localStorage；换设备/清缓存前先在「设置 → 数据管理 → 导出学习档案」备份 |
+| 想用数据库 / 多端同步 | 见 [DEPLOY.md](./DEPLOY.md)「可选：启用 D1」 |
+

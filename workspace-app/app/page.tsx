@@ -15,7 +15,7 @@ import {
   CORE_NAMES, QUICK_PROMPTS, MASTERY_OPTIONS, MOOD_OPTIONS,
 } from "./lib/default-data";
 import { TOAST_DURATION } from "./lib/rules";
-import { hydrateWorkspace, saveWorkspace, buildWorkspaceSnapshot, fetchServerWorkspace, readLocalSavedAt, fetchServerWorkspaceMeta } from "./lib/storage";
+import { hydrateWorkspace, saveWorkspace, buildWorkspaceSnapshot, fetchServerWorkspace, readLocalSavedAt, fetchServerWorkspaceMeta, isServerNewerThanLocal } from "./lib/storage";
 import { restoreMissingFilesFromServer, garbageCollectServerFiles } from "./lib/pdf-storage";
 import { syncAiConfigFromServer } from "./lib/ai/chat-complete";
 import { loadLearningEvents, type LearningEvent } from "./lib/events";
@@ -536,14 +536,12 @@ export default function Home() {
       }
       // AI 网关配置跨设备拉取（本机未配置时从服务端取回）
       void syncAiConfigFromServer();
-      // 多设备新鲜度：服务端快照更新于本地 → 提示用户选择载入（防止静默覆盖）
+      // 多设备新鲜度：服务端快照更新于本地（含容差）→ 提示用户选择载入（防止静默覆盖）
       const localSavedAt = readLocalSavedAt();
       if (localSavedAt) {
         void fetchServerWorkspaceMeta().then((meta) => {
           if (!meta?.updatedAt) return;
-          const serverTime = new Date(meta.updatedAt.replace(" ", "T") + "Z").getTime();
-          const localTime = new Date(localSavedAt).getTime();
-          if (Number.isFinite(serverTime) && serverTime > localTime) setServerNewer(true);
+          if (isServerNewerThanLocal(localSavedAt, meta.updatedAt)) setServerNewer(true);
         });
       }
       if (data.materials && Array.isArray(data.materials)) {

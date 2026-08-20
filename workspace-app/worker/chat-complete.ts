@@ -5,11 +5,13 @@
  *
  * 网关可配置（参考 NestLife 的 AI 网关方案）：
  *   - 客户端请求头 x-api-base-url / x-api-model / x-api-key（设置页配置）
- *   - 回退服务端环境变量 AI_BASE_URL / AI_MODEL / DEEPSEEK_API_KEY
+ *   - 回退环境变量（env 绑定 + process.env）AI_BASE_URL / AI_MODEL / DEEPSEEK_API_KEY
  *   - 默认 DeepSeek
  *
  * 2026-08-03：改为 stream:true + SSE 转发，前端逐块渲染（打字机效果）。
  */
+
+import { aiEnvFallback } from "./ai-env.ts";
 
 const DEFAULT_URL = "https://api.deepseek.com/chat/completions";
 const DEFAULT_MODEL = "deepseek-chat";
@@ -80,9 +82,9 @@ export async function handleChatComplete(request: Request, env: ChatEnv | undefi
   const userKey = request.headers.get("x-api-key")?.trim();
   const userUrl = request.headers.get("x-api-base-url")?.trim();
   const userModel = request.headers.get("x-api-model")?.trim();
-  const key = userKey || e.DEEPSEEK_API_KEY;
-  const baseUrl = userUrl || e.AI_BASE_URL || DEFAULT_URL;
-  const model = userModel || e.AI_MODEL || DEFAULT_MODEL;
+  const key = userKey || aiEnvFallback(e as Record<string, unknown>, "DEEPSEEK_API_KEY");
+  const baseUrl = userUrl || aiEnvFallback(e as Record<string, unknown>, "AI_BASE_URL") || DEFAULT_URL;
+  const model = userModel || aiEnvFallback(e as Record<string, unknown>, "AI_MODEL") || DEFAULT_MODEL;
   if (!key) return json({ ok: false, error: "no_api_key", message: "未配置模型密钥" }, 503);
   if (!/^https?:\/\//i.test(baseUrl)) {
     return json({ ok: false, error: "bad_gateway_url", message: "网关地址需以 http(s):// 开头" }, 400);

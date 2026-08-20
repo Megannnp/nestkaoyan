@@ -335,6 +335,23 @@ export function saveWorkspace(snapshot: Omit<WorkspaceSnapshot, "storageVersion"
   return ok;
 }
 
+/**
+ * 多设备新鲜度判定（含容差）。
+ * 服务端 updatedAt 由 PUT 到达时写入，总是略晚于本机 savedAt（同设备自更新通常 <1s）；
+ * 加 90s 容差可避免"每次打开都误报"，同时仍能捕获真实的跨设备更新。
+ */
+export function isServerNewerThanLocal(
+  localSavedAt: string,
+  serverUpdatedAt: string,
+  toleranceMs = 90_000,
+): boolean {
+  // SQLite CURRENT_TIMESTAMP 为 UTC "YYYY-MM-DD HH:MM:SS"；补 Z 后按 UTC 解析
+  const serverTime = new Date(serverUpdatedAt.replace(" ", "T") + "Z").getTime();
+  const localTime = new Date(localSavedAt).getTime();
+  if (!Number.isFinite(serverTime) || !Number.isFinite(localTime)) return false;
+  return serverTime - localTime > toleranceMs;
+}
+
 /** 读取本地快照的 savedAt（用于与服务端 updatedAt 比较新鲜度） */
 export function readLocalSavedAt(): string | null {
   const raw = window.localStorage.getItem(WORKSPACE_KEY);
@@ -359,9 +376,12 @@ export async function fetchServerWorkspaceMeta(): Promise<{ updatedAt: string; s
       storageVersion?: unknown;
     };
     if (!body?.ok || !body.snapshot) return null;
+    const storageVersion = typeof body.storageVersion === "number" ? body.storageVersion : 0;
+    // 只读保护：服务端版本高于当前构建 → 不提示（避免"载入服务端"后因版本守卫无动作的死胡同）
+    if (storageVersion > STORAGE_VERSION) return null;
     return {
       updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
-      storageVersion: typeof body.storageVersion === "number" ? body.storageVersion : 0,
+      storageVersion,
     };
   } catch {
     return null;

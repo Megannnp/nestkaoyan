@@ -16,6 +16,8 @@ interface AnalyzeEnv {
   AI_MODEL?: string;
 }
 
+import { aiEnvFallback } from "./ai-env.ts";
+
 interface MistakeInput {
   year?: string;
   number?: string;
@@ -119,9 +121,9 @@ export async function handleAnalyzeMistakes(request: Request, env: AnalyzeEnv | 
   // 支持任意 OpenAI 兼容网关：请求头（设置页配置）> 环境变量 > 默认 DeepSeek。
   // 防御：vinext 本地/生产服务器调用 worker.fetch 时 env 可能为 undefined。
   const e: AnalyzeEnv = env ?? {};
-  const key = request.headers.get("x-api-key")?.trim() || e.DEEPSEEK_API_KEY;
-  const baseUrl = request.headers.get("x-api-base-url")?.trim() || e.AI_BASE_URL || DEEPSEEK_URL;
-  const model = request.headers.get("x-api-model")?.trim() || e.AI_MODEL || MODEL;
+  const key = request.headers.get("x-api-key")?.trim() || aiEnvFallback(e as Record<string, unknown>, "DEEPSEEK_API_KEY");
+  const baseUrl = request.headers.get("x-api-base-url")?.trim() || aiEnvFallback(e as Record<string, unknown>, "AI_BASE_URL") || DEEPSEEK_URL;
+  const model = request.headers.get("x-api-model")?.trim() || aiEnvFallback(e as Record<string, unknown>, "AI_MODEL") || MODEL;
   if (!key) {
     return json({ ok: false, error: "no_api_key", message: "未配置模型密钥" }, 503);
   }

@@ -38,13 +38,14 @@ export async function handleFiles(request: Request, env: FilesEnv | undefined): 
   }
   try {
     const upstream = await fetch(target.toString(), init);
-    const body = await upstream.arrayBuffer();
-    return new Response(body, {
-      status: upstream.status,
-      headers: {
-        "content-type": upstream.headers.get("content-type") ?? "application/octet-stream",
-      },
+    const headers = new Headers({
+      "content-type": upstream.headers.get("content-type") ?? "application/octet-stream",
     });
+    if (upstream.headers.get("content-length")) {
+      headers.set("content-length", upstream.headers.get("content-length")!);
+    }
+    // 直接流式透传 upstream body，避免大文件（PDF 数十 MB）在 worker 内存中整体缓冲
+    return new Response(upstream.body, { status: upstream.status, headers });
   } catch {
     return json({ ok: false, skipped: true, error: "sqlite_unavailable" }, 503);
   }

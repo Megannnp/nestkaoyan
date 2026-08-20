@@ -27,6 +27,7 @@ async function proxyToSqlite(request: Request, baseUrl: string): Promise<Respons
   const target = new URL(url.pathname.replace(/^\/api/, "") + url.search, baseUrl);
   const headers = new Headers(request.headers);
   headers.set("content-type", "application/json; charset=utf-8");
+  headers.delete("content-length");
   const init: RequestInit = { method: request.method, headers, redirect: "follow" };
   if (request.method === "PUT") {
     init.body = await request.text();

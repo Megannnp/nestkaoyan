@@ -11,7 +11,7 @@
 |------|----------|----------|
 | **线上访问** | 部署到 **Cloudflare Workers**（本项目原生支持） | 在自己电脑跑 `npm run dev`（关机即断线） |
 | **架构** | vinext = 前端 React + 后端 Worker **同一部署单元** | 拆成 VPS + Nginx + Node + MySQL |
-| **数据库** | 默认 localStorage 免运维；多端同步才启用 **D1** | 强制引入本地 MySQL |
+| **数据库** | 本机部署默认「浏览器 localStorage + 本地 SQLite 双写」（免运维、数据不丢）；线上云端多端同步才启用 **D1** | 强制引入本地 MySQL |
 | **AI 密钥** | Worker 机密（`wrangler secret put`），每套部署换自己的 key | 写死在代码里 |
 
 **为什么 Cloudflare Workers 永不掉线？**
@@ -74,14 +74,14 @@ npm run build && npx wrangler deploy
 
 ---
 
-## 五、可选：启用 D1 云数据库（多端同步/机构版）
+## 五、本机/局域网与云数据库
 
-当前版本数据默认在浏览器 localStorage（单机免运维、可导出备份）。
-**只有**需要以下能力时才启用 D1：
+**本机 / 局域网（Docker、双击脚本、手动）**：默认启用**本地 SQLite 同步服务**（`database/server.mjs`，零依赖 `node:sqlite`）——浏览器 localStorage 秒开离线，服务端 SQLite 权威持久化，换浏览器 / 换设备（同一局域网）自动恢复，默认启用访问密码。
 
-- 多设备共享同一个学习档案
+**云端（Cloudflare Workers）**：数据在浏览器 localStorage；**只有**需要以下能力时才启用 D1：
+
+- 多设备共享同一个学习档案（云端多端同步）
 - 后台统一查看/管理所有用户数据
-- 数据不随浏览器清理丢失
 
 启用步骤（需要 Cloudflare D1 数据库）：
 ```bash
@@ -97,7 +97,7 @@ npx wrangler d1 migrations apply kaoyan-workspace --remote
 npm run build && npx wrangler deploy
 ```
 
-> 代码中已预留 `mirrorWorkspaceToD1()`（storage.ts），启用 D1 绑定后自动镜像写入。
+> 代码中已预留 `mirrorWorkspaceToD1()`（storage.ts）与本地 `WORKSPACE_DB_URL` 代理（worker），本机 SQLite / 云端 D1 共用同一套 `/api/workspace` 契约，启用哪个后端由环境变量决定。
 
 ---
 
@@ -108,7 +108,7 @@ npm run build && npx wrangler deploy
 | 24 小时在线 | Cloudflare Workers 全球边缘网络（无需自管进程） |
 | 零停机发布 | `wrangler deploy` 无缝替换版本，无重启窗口 |
 | 密钥安全 | Worker 机密 + `.dev.vars` 本地开发，双环境均不入 Git |
-| 数据可备份 | 用户「设置 → 数据管理」导出 JSON；启 D1 后加自动备份 |
+| 数据可备份 | 本机 SQLite 文件 + 「设置 → 数据管理」导出 JSON；云端启 D1 后自动备份 |
 | 恢复能力 | 代码在 Git；密钥在 Cloudflare 面板；数据可导出导入 |
 
 ---

@@ -46,7 +46,7 @@
 | **B. 双击脚本** | macOS / Windows 用户 | 双击 `install.command`（Mac）/ `install.bat`（Win） |
 | **C. 开发者手动** | 想改代码 | `npm install` → `npm run dev`（需 Node ≥ 22.13） |
 
-**数据 100% 留在本机浏览器 localStorage**（零数据库、断网可用），个人 / 非商用免费使用。
+**数据双写本机**：浏览器 localStorage（秒开、离线）+ 本地 SQLite（`data/kaoyan.db`，权威持久化）——换浏览器、清缓存、换设备（同一局域网）数据自动恢复；默认启用**访问密码**（本机免登录，其他设备需输入）。个人 / 非商用免费使用。
 
 **真题 PDF（可选）**：代码内置 72 套公共课真题的声明与命名规范，PDF 文件按 [`public/papers/README.md`](./public/papers/README.md) 放置后即自动以原卷浏览 + AI 讲解。开源仓库**不含真题文件**（版权材料）。
 

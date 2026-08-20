@@ -160,7 +160,7 @@ npm run deploy
 | 手机打不开电脑的 localhost | 手机连同一 WiFi，访问 `http://电脑IP:3000`；需输入访问密码（首次安装自动生成，见 `data/password.txt`） |
 | 其他设备访问要密码吗 | 默认启用访问密码：**本机（localhost）免登录**，局域网/其他设备需输入密码；密码在 `data/password.txt`（Docker 在 `/app/data/password.txt`，容器日志也会打印） |
 | 忘记访问密码 | 打开 `data/password.txt` 查看；或删除该文件后重启（会重新生成） |
-| AI 提示"演示回复" | 在「设置 → AI 学习助手」填写**网关地址（OpenAI 兼容端点）+ API Key**（DeepSeek/通义千问/Kimi/Ollama 本地模型均可；key 只存本机并可选同步） |
+| AI 提示"演示回复" | 在「设置 → AI 学习助手」填写**网关地址（OpenAI 兼容端点）+ API Key**（DeepSeek/通义千问/Kimi/Ollama 本地模型均可；配置自动同步到服务端，受访问密码保护） |
 | 数据会丢吗 | 三种安装方式都自动启用本地 SQLite（`data/kaoyan.db`），换浏览器/清缓存不丢；备份 = 拷贝该文件或「设置 → 数据管理 → 导出」 |
 | 多台设备同时在用，数据会互相覆盖吗 | 不会静默覆盖：打开时若服务端快照比本机新，会弹窗提示「载入服务端 / 保留本地」；确认载入后以服务端为准 |
 

@@ -4,6 +4,42 @@
 
 格式：`YYYY-MM-DD | 修改内容 | 修改人 | 涉及文件`
 
+## 2026-08-20（开源就绪：本地 SQLite 同步 + 访问密码 + 任意 AI 网关 + 多设备保护）
+
+> 将产品升级为「打包安装 = 数据落本机磁盘、不跟浏览器走」的完整形态，并开源到 GitHub。
+
+### 存储与同步（本地 SQLite + 双写）
+| 修改 | 涉及文件 | 说明 |
+|------|---------|------|
+| 本地 SQLite 同步服务 | `database/server.mjs` | 零依赖（`node:sqlite`）HTTP 服务：工作区快照 + 文件二进制 + AI 网关配置持久化 |
+| worker 后端选择 | `worker/workspace.ts`、`worker/files.ts`、`worker/index.ts` | D1（云端）→ 本地 SQLite（`WORKSPACE_DB_URL`）→ localStorage（兜底）三级 |
+| 客户端双写与恢复 | `app/lib/storage.ts`、`app/lib/pdf-storage.ts`、`app/page.tsx` | 换浏览器/清缓存/换设备自动恢复工作区、PDF/文本文件、AI 配置 |
+| 多设备新鲜度 | `storage.ts`（`isServerNewerThanLocal`）| 服务端快照更新时弹窗「载入服务端/保留本地」，90s 容差防误报 |
+| 孤儿文件 GC | `database/server.mjs`（`/files/gc`） | 加载后自动清理崩溃残留 |
+| 大小上限 | `database/server.mjs` | 工作区 50MB、单文件 200MB（可配） |
+
+### 安全（访问密码，参考 NestLife）
+| 修改 | 涉及文件 | 说明 |
+|------|---------|------|
+| 密码认证 | `worker/auth.ts`、`worker/index.ts`、`app/components/LoginOverlay.tsx` | 本机免登录、局域网/其他设备需密码；SHA-256 session + 常量时间比较 + 登录限流 |
+| 自动生成密码 | `install.command`、`install.bat`、`entrypoint.sh` | 首次安装自动生成并保存 `data/password.txt`，默认启用 |
+| sidecar 防暴露 | `database/server.mjs` | 默认仅绑定 127.0.0.1（Docker 内网设 0.0.0.0） |
+
+### AI 网关可配置（参考 NestLife）
+| 修改 | 涉及文件 | 说明 |
+|------|---------|------|
+| 任意 OpenAI 兼容网关 | `worker/chat-complete.ts`、`analyze-exam.ts`、`analyze-mistakes.ts`、`plan-generate.ts` | 请求头 URL/Key/模型 > 环境变量（`AI_BASE_URL`/`AI_MODEL`）> 默认 DeepSeek |
+| 配置跨设备同步 | `database/server.mjs`（`/ai-config`）、`worker/workspace.ts`、`chat-complete.ts`（客户端） | 设置页填 URL+Key+模型，自动同步 |
+| 修复 env undefined 崩溃 | 全部 4 个 AI handler | 本地服务器 `env` 为 undefined 时不再 500 |
+
+### 缺陷修复
+| 修改 | 说明 |
+|------|------|
+| 打字机 interval 泄漏 | `use-chat-session.ts` 清理动画定时器 |
+| 多设备新鲜度误报 | 90s 容差（同设备自更新不再弹窗） |
+| 文件下载整体缓冲 | `worker/files.ts` 改为流式透传 |
+| ai-env 导入扩展名 | Node 测试运行器要求 `.ts` 后缀 |
+
 ## 2026-08-19（交付收尾：线上部署 + 授权统一 + 缺陷根因修复）
 
 > 交付审查完成后的收尾：全项回归通过后上线，修复审查发现的全部缺陷。

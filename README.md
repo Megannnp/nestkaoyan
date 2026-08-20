@@ -4,7 +4,7 @@
 > 目标先行 → 知识图谱 → 动态计划 → Agent 闭环，帮助备考者从「知道」到「会用」。
 
 - **内核**：从真题抽出核心考点，按「理解 → 展开 → 练习 → 综合」4 层递进，整门课走「打底 → 连线 → 补漏 → 提速 → 真题 → 冲刺」6 轮
-- **形态**：前端 React（Next.js 16 / vinext）+ 后端 Cloudflare Worker 全栈，数据默认 localStorage（免运维）
+- **形态**：前端 React（Next.js 16 / vinext）+ 后端 Cloudflare Worker 全栈，数据双写本机（浏览器 + 本地 SQLite，默认启用访问密码）
 - **真题**：内置 72 套公共课真题的声明与命名规范（政治 / 英语一 / 英语二 / 数学二），PDF 按规范放置即可原卷浏览 + AI 讲解
 
 ## 快速开始
@@ -21,7 +21,7 @@
 # 开发者手动（Node.js ≥ 22.13）
 cd workspace-app
 npm install
-cp .env.example .dev.vars      # 填 DEEPSEEK_API_KEY（可选，不填 AI 降级为演示）
+cp .env.example .dev.vars      # 按需填 AI 网关 URL/Key（可选，不填 AI 降级为演示）
 npm run dev                    # http://localhost:3000
 npm run build                  # 生产构建（产出 dist/）
 npm run deploy                 # 上线 Cloudflare Workers
@@ -36,7 +36,7 @@ npm run deploy                 # 上线 Cloudflare Workers
 
 - **授权**：双轨——个人 / 学生 / 教育 / 非营利**免费**使用、修改、再分发（保留版权声明）；**商用需购买授权**。详见 [LICENSE](./LICENSE)。
 - **真题 PDF 不含在仓库**（版权材料，见 `workspace-app/public/papers/README.md` 放置规范）
-- **测试**：单元 79/79 ✅ · E2E 68/68 ✅（Playwright）
+- **测试**：单元 111/111 ✅ · E2E 68/68 ✅（Playwright）
 
 © 2026 重庆语梦筑巢科技有限责任公司 · 筑巢考研工作台™
 

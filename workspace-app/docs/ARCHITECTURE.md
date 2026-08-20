@@ -13,12 +13,13 @@ workspace-app/
 │   │   ├── types.ts          # 所有 TypeScript 类型定义
 │   │   ├── default-data.ts   # 所有初始/演示数据
 │   │   ├── design-tokens.ts  # 设计 Token（字号、颜色、间距）
-│   │   └── storage.ts        # (未来) localStorage 统一操作层
+│   │   └── storage.ts        # localStorage 统一操作层（hydrate/save/migrate）+ 服务端镜像
 │   ├── page.tsx              # 主页面（后续需拆分为组件）
 │   ├── layout.tsx            # 根布局
 │   ├── globals.css           # 全局样式
 │   └── chatgpt-auth.ts       # ChatGPT 认证相关
-├── db/                       # (未来) D1 数据库层
+├── db/                       # D1 schema（drizzle，云端可选）
+├── database/                 # 本地 SQLite 同步服务（server.mjs，零依赖 node:sqlite）
 ├── tests/                    # 测试文件
 ├── docs/                     # 工程文档
 └── ...
@@ -80,7 +81,7 @@ User Input / AI Agent
         ↓
    State Setter (useState)
         ↓
-   useEffect (auto-save to localStorage)
+   useEffect (auto-save to localStorage + 镜像 SQLite/D1)
         ↓
    Derived Values (computed)
         ↓

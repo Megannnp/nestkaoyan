@@ -1,7 +1,9 @@
-# Storage Contract（Stabilization 1C-0 设计，本轮不写代码）
+# Storage Contract（Stabilization 1C-1 已实现）
 
-> 阶段：Stabilization 1C-0（设计）→ 1C-1（implement）→ 1C-2（migration/rollback 演练）
-> 约束：本文件只描述契约；任何代码改动放到 1C-1。
+> 阶段：1C-0（设计）→ 1C-1（**已实现**：storage.ts 统一 hydrate/save/migrate）→ 1C-2（migration/rollback 演练）
+> 2026-08-20 增补：新增本地 SQLite 同步服务（`database/server.mjs`），浏览器 localStorage 与服务端
+> **双写**；多设备新鲜度检测（本地 `savedAt` vs 服务端 `updatedAt`，90s 容差）；PDF/文本二进制服务端
+> 持久化 + GC；AI 网关配置（URL/Key/模型）跨设备同步。详见 [`database/README.md`](../workspace-app/database/README.md)。
 > 依据：现有存储事实（2026-07-31 验收审计）
 >
 > 2026-08-04 审查修复：`events.ts` 事件流 key 由误用的 `nest-exam-workspace-v4`

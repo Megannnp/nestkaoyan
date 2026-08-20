@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import type { AppSettings, ExamGoal, Subject } from "../lib/types";
 import { NEW_SUBJECT_TEMPLATE, getDefaultMaxScore } from "../lib/subject-utils";
-import { getStoredApiKey, setStoredApiKey, mirrorApiKeyToServer } from "../lib/ai/chat-complete";
+import { getStoredApiKey, setStoredApiKey, mirrorAiConfigToServer, getStoredAiBaseUrl, setStoredAiBaseUrl, getStoredAiModel, setStoredAiModel } from "../lib/ai/chat-complete";
 import { chatCompleteStream, chatErrorReason } from "../lib/ai/chat-complete";
 import styles from "../../styles/components.module.css";
 
@@ -45,8 +45,10 @@ export function SettingsPanel({
   const [newSubject, setNewSubject] = useState<Subject>(NEW_SUBJECT_TEMPLATE());
   const [subjectNameError, setSubjectNameError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // ─── API Key 配置（与初始化向导一致：保存 + 真实 SSE 连接测试） ───
+  // ─── API 配置（网关 URL + 模型 + Key；与初始化向导一致：保存 + 真实 SSE 连接测试） ───
   const [apiKey, setApiKey] = useState(() => getStoredApiKey());
+  const [aiBaseUrl, setAiBaseUrl] = useState(() => getStoredAiBaseUrl());
+  const [aiModel, setAiModel] = useState(() => getStoredAiModel());
   const [testingKey, setTestingKey] = useState(false);
   const [keyStatus, setKeyStatus] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -55,7 +57,9 @@ export function SettingsPanel({
     setKeyStatus(null);
     try {
       setStoredApiKey(apiKey);
-      void mirrorApiKeyToServer(); // 跨设备同步（存服务端，受访问密码保护）
+      setStoredAiBaseUrl(aiBaseUrl);
+      setStoredAiModel(aiModel);
+      void mirrorAiConfigToServer(); // 跨设备同步（存服务端，受访问密码保护）
       let responded = false;
       const done = new Promise<{ ok: boolean; error?: string }>((resolve) => {
         void chatCompleteStream({
@@ -74,7 +78,7 @@ export function SettingsPanel({
     } finally {
       setTestingKey(false);
     }
-  }, [apiKey]);
+  }, [apiKey, aiBaseUrl, aiModel]);
 
   const totalTargetScore = useMemo(() =>
     subjects.reduce((sum, s) => sum + (Number(s.targetScore) || 0), 0),
@@ -476,29 +480,61 @@ export function SettingsPanel({
 
       {/* 扁平化布局（2026-08-05 用户反馈：去掉模块套模块，延续极简风格） */}
       <div className={styles.settingsSection}>
+        {/* 网关地址（OpenAI 兼容端点） */}
+        <div className={styles.inputLabel}>网关地址（OpenAI 兼容端点）</div>
+        <input
+          className={`${styles.inputField} ${styles.settingsInputMarginSm}`}
+          type="text"
+          autoComplete="off"
+          placeholder="https://api.deepseek.com/chat/completions（留空默认 DeepSeek）"
+          value={aiBaseUrl}
+          onChange={(e) => { setAiBaseUrl(e.target.value); setKeyStatus(null); }}
+        />
+        {/* 模型名称（可选） */}
+        <div className={styles.inputLabel}>模型名称（可选）</div>
+        <input
+          className={`${styles.inputField} ${styles.settingsInputMarginSm}`}
+          type="text"
+          autoComplete="off"
+          placeholder="deepseek-chat（留空默认 deepseek-chat；Ollama 如 llama3）"
+          value={aiModel}
+          onChange={(e) => { setAiModel(e.target.value); setKeyStatus(null); }}
+        />
         {/* API Key */}
-        <div className={styles.inputLabel}>DeepSeek API Key</div>
+        <div className={styles.inputLabel}>API Key</div>
         <input
           className={`${styles.inputField} ${styles.settingsInputMarginSm}`}
           type="password"
           autoComplete="off"
-          placeholder="sk-…（在 https://platform.deepseek.com/api_keys 申请）"
+          placeholder="sk-…（DeepSeek 在 https://platform.deepseek.com/api_keys 申请；本地 Ollama 可留空）"
           value={apiKey}
           onChange={(e) => { setApiKey(e.target.value); setKeyStatus(null); }}
         />
         <div className={styles.dataActions}>
-          <button className={`${styles.primaryBtn} ${styles.btnSmall}`} disabled={!apiKey.trim() || testingKey} onClick={handleTestApiKey}>
+          <button className={`${styles.primaryBtn} ${styles.btnSmall}`} disabled={(!apiKey.trim() && !aiBaseUrl.trim()) || testingKey} onClick={handleTestApiKey}>
             {testingKey ? "测试连接中…" : "保存并测试连接"}
           </button>
-          {apiKey.trim() && (
+          {(apiKey.trim() || aiBaseUrl.trim() || aiModel.trim()) && (
             <button
               className={`${styles.secondaryBtn} ${styles.btnSmall}`}
-              onClick={() => { setApiKey(""); setStoredApiKey(""); setKeyStatus(null); }}
+              onClick={() => {
+                setApiKey("");
+                setAiBaseUrl("");
+                setAiModel("");
+                setStoredApiKey("");
+                setStoredAiBaseUrl("");
+                setStoredAiModel("");
+                void mirrorAiConfigToServer();
+                setKeyStatus(null);
+              }}
             >
               清除
             </button>
           )}
         </div>
+        <p className={`text-[12px] mt-2 ${styles.aiDetailLabel}`}>
+          支持任意 OpenAI 兼容网关：DeepSeek / 通义千问 / Kimi / Ollama 本地模型等。
+        </p>
         {keyStatus && (
           <p className={`text-[13px] mb-2 font-bold ${keyStatus.ok ? "text-[#18181B]" : "text-[#EF4444]"}`}>
             {keyStatus.text}

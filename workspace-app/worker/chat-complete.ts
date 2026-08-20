@@ -1,13 +1,18 @@
 /**
- * 通用 DeepSeek 文本补全端点（/api/chat-complete）——SSE 流式
+ * 通用 OpenAI 兼容文本补全端点（/api/chat-complete）——SSE 流式
  * 供「笔记生成」「资料内容讲解」等自由文本意图复用。
  * key 只在服务端读取；缺 key → 503；失败由客户端诚实降级。
+ *
+ * 网关可配置（参考 NestLife 的 AI 网关方案）：
+ *   - 客户端请求头 x-api-base-url / x-api-model / x-api-key（设置页配置）
+ *   - 回退服务端环境变量 AI_BASE_URL / AI_MODEL / DEEPSEEK_API_KEY
+ *   - 默认 DeepSeek
  *
  * 2026-08-03：改为 stream:true + SSE 转发，前端逐块渲染（打字机效果）。
  */
 
-const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
-const MODEL = "deepseek-chat";
+const DEFAULT_URL = "https://api.deepseek.com/chat/completions";
+const DEFAULT_MODEL = "deepseek-chat";
 const TIMEOUT_MS = 60_000;
 
 function json(data: unknown, status = 200): Response {
@@ -15,6 +20,14 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+interface ChatEnv {
+  DEEPSEEK_API_KEY?: string;
+  /** OpenAI 兼容网关地址（可选；默认 https://api.deepseek.com/chat/completions） */
+  AI_BASE_URL?: string;
+  /** 默认模型名（可选；默认 deepseek-chat） */
+  AI_MODEL?: string;
 }
 
 /** 将上游 DeepSeek SSE 流解析为 `data: {"content":"..."}` 转发给浏览器 */
@@ -58,13 +71,22 @@ function buildSseStream(upstream: ReadableStream<Uint8Array>): ReadableStream<Ui
   });
 }
 
-export async function handleChatComplete(request: Request, env: { DEEPSEEK_API_KEY?: string }): Promise<Response> {
-  // 2026-08-05：支持用户在前端「添加 API Key」步骤输入自己的密钥。
-  // 优先使用请求头 x-api-key（用户自配密钥），其次回退到服务端 env.DEEPSEEK_API_KEY。
-  // 密钥只在 worker 内使用，绝不写入响应或下发前端。
+export async function handleChatComplete(request: Request, env: ChatEnv | undefined): Promise<Response> {
+  // 2026-08-05：支持用户在前端「添加 API Key」步骤输入自己的密钥；
+  // 2026-08-20：支持任意 OpenAI 兼容网关（URL + 模型 + Key 均可客户端配置）。
+  // 优先级：请求头（设置页配置）> 环境变量 > 默认 DeepSeek。
+  // 防御：vinext 本地/生产服务器调用 worker.fetch 时 env 可能为 undefined。
+  const e: ChatEnv = env ?? {};
   const userKey = request.headers.get("x-api-key")?.trim();
-  const key = userKey || env.DEEPSEEK_API_KEY;
+  const userUrl = request.headers.get("x-api-base-url")?.trim();
+  const userModel = request.headers.get("x-api-model")?.trim();
+  const key = userKey || e.DEEPSEEK_API_KEY;
+  const baseUrl = userUrl || e.AI_BASE_URL || DEFAULT_URL;
+  const model = userModel || e.AI_MODEL || DEFAULT_MODEL;
   if (!key) return json({ ok: false, error: "no_api_key", message: "未配置模型密钥" }, 503);
+  if (!/^https?:\/\//i.test(baseUrl)) {
+    return json({ ok: false, error: "bad_gateway_url", message: "网关地址需以 http(s):// 开头" }, 400);
+  }
 
   let body: { system?: string; user: string; temperature?: number; maxTokens?: number };
   try {
@@ -79,11 +101,11 @@ export async function handleChatComplete(request: Request, env: { DEEPSEEK_API_K
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const resp = await fetch(DEEPSEEK_URL, {
+    const resp = await fetch(baseUrl, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         messages: [
           ...(system ? [{ role: "system", content: system }] : []),
           { role: "user", content: user },

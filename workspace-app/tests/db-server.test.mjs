@@ -258,6 +258,33 @@ test("AI 密钥：未设置时返回空串", async () => {
   assert.equal(body.key, "");
 });
 
+test("AI 网关配置：PUT url+key+model 后 GET 返回；覆盖更新", async () => {
+  const putRes = await fetch(`${base}/ai-config`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url: "http://localhost:11434/v1/chat/completions", key: "sk-ollama", model: "llama3" }),
+  });
+  assert.equal(putRes.status, 200);
+
+  const getRes = await fetch(`${base}/ai-config`);
+  const body = await getRes.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.url, "http://localhost:11434/v1/chat/completions");
+  assert.equal(body.key, "sk-ollama");
+  assert.equal(body.model, "llama3");
+
+  // 覆盖更新
+  await fetch(`${base}/ai-config`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url: "https://api.deepseek.com/chat/completions", key: "sk-ds2", model: "deepseek-chat" }),
+  });
+  const body2 = await (await fetch(`${base}/ai-config`)).json();
+  assert.equal(body2.url, "https://api.deepseek.com/chat/completions");
+  assert.equal(body2.key, "sk-ds2");
+  assert.equal(body2.model, "deepseek-chat");
+});
+
 // ─── workspace 大小上限 ──────────────────────────────
 
 test("workspace 超限 → 413", async () => {

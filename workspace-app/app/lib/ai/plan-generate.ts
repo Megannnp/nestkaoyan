@@ -1,4 +1,5 @@
 import type { KnowledgeNode, Question, Subject, Task, StudyDay } from "../types";
+import { aiGatewayHeaders } from "./chat-complete";
 
 export interface PlanTask { title: string; subject: string; core: string; knowledge: string; round: string; layer: string; minutes: number; reason: string; priority: number }
 export interface PlanResult { ok: boolean; provider?: string; summary: string; tasks: PlanTask[]; error?: string; message?: string }
@@ -47,7 +48,7 @@ export async function generatePlan(ctx: PlanContext): Promise<PlanResult> {
   try {
     const resp = await fetch("/api/plan-generate", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...aiGatewayHeaders() },
       body: JSON.stringify(payload),
     });
     const data = (await resp.json().catch(() => null)) as Partial<PlanResult> | null;

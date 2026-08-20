@@ -10,6 +10,10 @@
 
 interface AnalyzeEnv {
   DEEPSEEK_API_KEY?: string;
+  /** OpenAI 兼容网关地址（可选；默认 DeepSeek） */
+  AI_BASE_URL?: string;
+  /** 默认模型名（可选；默认 deepseek-chat） */
+  AI_MODEL?: string;
 }
 
 interface MistakeInput {
@@ -111,10 +115,15 @@ export function parseMistakeContent(content: string): AnalyzeParsed {
   return { summary, mistakes };
 }
 
-export async function handleAnalyzeMistakes(request: Request, env: AnalyzeEnv): Promise<Response> {
-  const key = env.DEEPSEEK_API_KEY;
+export async function handleAnalyzeMistakes(request: Request, env: AnalyzeEnv | undefined): Promise<Response> {
+  // 支持任意 OpenAI 兼容网关：请求头（设置页配置）> 环境变量 > 默认 DeepSeek。
+  // 防御：vinext 本地/生产服务器调用 worker.fetch 时 env 可能为 undefined。
+  const e: AnalyzeEnv = env ?? {};
+  const key = request.headers.get("x-api-key")?.trim() || e.DEEPSEEK_API_KEY;
+  const baseUrl = request.headers.get("x-api-base-url")?.trim() || e.AI_BASE_URL || DEEPSEEK_URL;
+  const model = request.headers.get("x-api-model")?.trim() || e.AI_MODEL || MODEL;
   if (!key) {
-    return json({ ok: false, error: "no_api_key", message: "服务端未配置 DEEPSEEK_API_KEY" }, 503);
+    return json({ ok: false, error: "no_api_key", message: "未配置模型密钥" }, 503);
   }
 
   let body: AnalyzeRequestBody;
@@ -135,14 +144,14 @@ export async function handleAnalyzeMistakes(request: Request, env: AnalyzeEnv): 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const resp = await fetch(DEEPSEEK_URL, {
+    const resp = await fetch(baseUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         messages: buildMessages(subject, mistakes),
         response_format: { type: "json_object" },
         temperature: 0.2,

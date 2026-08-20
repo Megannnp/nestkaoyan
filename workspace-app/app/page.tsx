@@ -17,7 +17,7 @@ import {
 import { TOAST_DURATION } from "./lib/rules";
 import { hydrateWorkspace, saveWorkspace, buildWorkspaceSnapshot, fetchServerWorkspace, readLocalSavedAt, fetchServerWorkspaceMeta } from "./lib/storage";
 import { restoreMissingFilesFromServer, garbageCollectServerFiles } from "./lib/pdf-storage";
-import { syncApiKeyFromServer } from "./lib/ai/chat-complete";
+import { syncAiConfigFromServer } from "./lib/ai/chat-complete";
 import { loadLearningEvents, type LearningEvent } from "./lib/events";
 import { computeReplayComparison, computeProgressComparison } from "./lib/replay-console";
 import { projectKnowledgeState } from "./lib/projection";
@@ -534,8 +534,8 @@ export default function Home() {
         // 服务端孤儿文件 GC（崩溃残留/删除镜像失败兜底）
         void garbageCollectServerFiles(data.resources.map((r) => r.fileStorageKey).filter((k): k is string => Boolean(k)));
       }
-      // AI 密钥跨设备拉取（本机无 key 时从服务端取回）
-      void syncApiKeyFromServer();
+      // AI 网关配置跨设备拉取（本机未配置时从服务端取回）
+      void syncAiConfigFromServer();
       // 多设备新鲜度：服务端快照更新于本地 → 提示用户选择载入（防止静默覆盖）
       const localSavedAt = readLocalSavedAt();
       if (localSavedAt) {

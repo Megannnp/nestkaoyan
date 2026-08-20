@@ -1,7 +1,11 @@
-/** 客户端封装：调 DeepSeek 自由文本补全端点（SSE 流式） */
+/** 客户端封装：调 OpenAI 兼容网关自由文本补全端点（SSE 流式） */
 // 2026-08-05：用户可在「初始化 · 添加 API Key」步骤输入自己的 DeepSeek 密钥。
-// 密钥仅保存在本机 localStorage，并在请求头 x-api-key 中发送给 worker（worker 内部使用，绝不下发）。
+// 2026-08-20：支持任意 OpenAI 兼容网关（URL + Key + 模型），参考 NestLife AI 网关方案。
+// 配置仅保存在本机 localStorage，并在请求头 x-api-key / x-api-base-url / x-api-model 中
+// 发送给 worker（worker 内部使用，绝不下发）。
 export const DEEPSEEK_API_KEY_STORAGE_KEY = "kaoyan_deepseek_api_key";
+export const AI_BASE_URL_STORAGE_KEY = "kaoyan_ai_base_url";
+export const AI_MODEL_STORAGE_KEY = "kaoyan_ai_model";
 
 export function getStoredApiKey(): string {
   try {
@@ -19,30 +23,79 @@ export function setStoredApiKey(key: string): void {
   } catch { /* localStorage 不可用（隐私模式）时静默 */ }
 }
 
-/** 服务端密钥同步（跨设备；存 SQLite meta 表，受访问密码保护） */
-
-/** 拉取：本机无密钥时从服务端取回（换设备自动同步） */
-export async function syncApiKeyFromServer(): Promise<void> {
+export function getStoredAiBaseUrl(): string {
   try {
-    if (getStoredApiKey()) return;
-    const res = await fetch("/api/ai-key", { method: "GET" });
+    return (localStorage.getItem(AI_BASE_URL_STORAGE_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export function setStoredAiBaseUrl(url: string): void {
+  try {
+    const trimmed = url.trim();
+    if (trimmed) localStorage.setItem(AI_BASE_URL_STORAGE_KEY, trimmed);
+    else localStorage.removeItem(AI_BASE_URL_STORAGE_KEY);
+  } catch { /* 静默 */ }
+}
+
+export function getStoredAiModel(): string {
+  try {
+    return (localStorage.getItem(AI_MODEL_STORAGE_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export function setStoredAiModel(model: string): void {
+  try {
+    const trimmed = model.trim();
+    if (trimmed) localStorage.setItem(AI_MODEL_STORAGE_KEY, trimmed);
+    else localStorage.removeItem(AI_MODEL_STORAGE_KEY);
+  } catch { /* 静默 */ }
+}
+
+/** 组装 AI 网关请求头（设置页配置；未配置则省略，由 worker 回退环境变量） */
+export function aiGatewayHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const key = getStoredApiKey();
+  const url = getStoredAiBaseUrl();
+  const model = getStoredAiModel();
+  if (key) headers["x-api-key"] = key;
+  if (url) headers["x-api-base-url"] = url;
+  if (model) headers["x-api-model"] = model;
+  return headers;
+}
+
+/** 服务端 AI 网关配置同步（跨设备；存 SQLite meta 表，受访问密码保护） */
+
+/** 拉取：本机未配置时从服务端取回（换设备自动同步） */
+export async function syncAiConfigFromServer(): Promise<void> {
+  try {
+    if (getStoredApiKey() && getStoredAiBaseUrl()) return;
+    const res = await fetch("/api/ai-config", { method: "GET" });
     if (!res.ok) return;
-    const body = (await res.json()) as { ok?: boolean; key?: unknown };
-    if (body?.ok && typeof body.key === "string" && body.key.trim()) {
-      setStoredApiKey(body.key);
-    }
+    const body = (await res.json()) as { ok?: boolean; url?: unknown; key?: unknown; model?: unknown };
+    if (!body?.ok) return;
+    if (typeof body.key === "string" && body.key.trim() && !getStoredApiKey()) setStoredApiKey(body.key);
+    if (typeof body.url === "string" && body.url.trim() && !getStoredAiBaseUrl()) setStoredAiBaseUrl(body.url);
+    if (typeof body.model === "string" && body.model.trim() && !getStoredAiModel()) setStoredAiModel(body.model);
   } catch {
     /* 无后端/离线：静默 */
   }
 }
 
-/** 推送：保存密钥时镜像到服务端（换设备可用） */
-export async function mirrorApiKeyToServer(): Promise<void> {
+/** 推送：保存配置时镜像到服务端（换设备可用） */
+export async function mirrorAiConfigToServer(): Promise<void> {
   try {
-    await fetch("/api/ai-key", {
+    await fetch("/api/ai-config", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key: getStoredApiKey() }),
+      body: JSON.stringify({
+        key: getStoredApiKey(),
+        url: getStoredAiBaseUrl(),
+        model: getStoredAiModel(),
+      }),
     });
   } catch {
     /* 无后端/离线：静默 */
@@ -103,8 +156,8 @@ export async function chatCompleteStream(options: ChatStreamOptions): Promise<vo
       method: "POST",
       headers: {
         "content-type": "application/json",
-        // 2026-08-05：携带用户自配密钥（无则忽略，由 worker 回退 env.DEEPSEEK_API_KEY）
-        ...(getStoredApiKey() ? { "x-api-key": getStoredApiKey() } : {}),
+        // 携带用户自配网关（URL/模型/Key；无则忽略，由 worker 回退环境变量）
+        ...aiGatewayHeaders(),
       },
       body: JSON.stringify({ system, user, temperature, maxTokens }),
       signal,

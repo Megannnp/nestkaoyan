@@ -240,6 +240,40 @@ export async function startWorkspaceDbServer({
         return json(res, 200, { ok: true, removed });
       }
 
+      // ── AI 网关配置（跨设备同步；URL + Key + 模型，受访问密码保护）──
+      if (url.pathname === "/ai-config") {
+        if (req.method === "GET") {
+          const urlRow = db.prepare("select v from meta where k = 'ai_base_url'").get();
+          const keyRow = db.prepare("select v from meta where k = 'deepseek_api_key'").get();
+          const modelRow = db.prepare("select v from meta where k = 'ai_model'").get();
+          return json(res, 200, {
+            ok: true,
+            url: urlRow?.v ?? "",
+            key: keyRow?.v ?? "",
+            model: modelRow?.v ?? "",
+          });
+        }
+        if (req.method === "PUT") {
+          const raw = await readBody(req);
+          let body;
+          try {
+            body = JSON.parse(raw);
+          } catch {
+            return json(res, 400, { ok: false, error: "bad_json" });
+          }
+          const upsert = (k, v) =>
+            db.prepare(
+              `insert into meta (k, v) values (?, ?)
+               on conflict(k) do update set v = excluded.v`
+            ).run(k, v);
+          upsert("ai_base_url", typeof body?.url === "string" ? body.url.trim() : "");
+          upsert("deepseek_api_key", typeof body?.key === "string" ? body.key.trim() : "");
+          upsert("ai_model", typeof body?.model === "string" ? body.model.trim() : "");
+          return json(res, 200, { ok: true });
+        }
+        return json(res, 405, { ok: false, error: "method_not_allowed" });
+      }
+
       // ── AI 密钥（跨设备同步；随工作区密码保护，不入工作区快照/导出）──
       if (url.pathname === "/ai-key") {
         if (req.method === "GET") {

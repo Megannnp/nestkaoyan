@@ -44,6 +44,29 @@ async function proxyToSqlite(request: Request, baseUrl: string): Promise<Respons
   }
 }
 
+/** AI 网关配置跨设备同步（URL + Key + 模型，存服务端 meta 表；受访问密码保护） */
+export async function handleAiConfig(request: Request, env: WorkspaceEnv | undefined): Promise<Response> {
+  const e: WorkspaceEnv = env ?? {};
+  const dbUrl = workspaceDbUrl(e);
+  if (!dbUrl) return json({ ok: false, skipped: true, error: "no_storage_backend" });
+
+  const url = new URL(request.url);
+  const target = new URL(url.pathname.replace(/^\/api/, "") + url.search, dbUrl);
+  const headers = new Headers(request.headers);
+  headers.delete("content-length");
+  const init: RequestInit = { method: request.method, headers, redirect: "follow" };
+  if (request.method === "PUT") init.body = await request.text();
+  try {
+    const upstream = await fetch(target.toString(), init);
+    return new Response(await upstream.text(), {
+      status: upstream.status,
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
+  } catch {
+    return json({ ok: false, skipped: true, error: "sqlite_unavailable" }, 503);
+  }
+}
+
 /** AI 密钥跨设备同步（存服务端 meta 表；受 /api/* 密码保护，不入工作区快照/导出） */
 export async function handleAiKey(request: Request, env: WorkspaceEnv | undefined): Promise<Response> {
   const e: WorkspaceEnv = env ?? {};

@@ -1,4 +1,5 @@
 import type { Question } from "../types";
+import { aiGatewayHeaders } from "./chat-complete";
 
 /**
  * 客户端封装：调用服务端 /api/analyze-mistakes（错题 → 错因归因 + 分层建议）。
@@ -45,7 +46,7 @@ export async function analyzeMistakes(subject: string, mistakes: Question[]): Pr
   try {
     const resp = await fetch("/api/analyze-mistakes", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...aiGatewayHeaders() },
       body: JSON.stringify(payload),
     });
     const data = (await resp.json().catch(() => null)) as Partial<MistakesResult> | null;

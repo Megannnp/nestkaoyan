@@ -1,4 +1,5 @@
 import type { Question } from "../types";
+import { aiGatewayHeaders } from "./chat-complete";
 
 /**
  * 客户端封装：调用服务端 /api/analyze-exam（真题 → 高频考点/七核 + 建议图谱节点）。
@@ -50,7 +51,7 @@ export async function analyzeExam(subject: string, questions: Question[]): Promi
   try {
     const resp = await fetch("/api/analyze-exam", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...aiGatewayHeaders() },
       body: JSON.stringify(payload),
     });
     const data = (await resp.json().catch(() => null)) as Partial<AnalyzeResult> | null;

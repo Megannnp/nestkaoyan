@@ -1,5 +1,5 @@
 "use strict";
-interface E { DEEPSEEK_API_KEY?: string }
+interface E { DEEPSEEK_API_KEY?: string; AI_BASE_URL?: string; AI_MODEL?: string }
 interface TI { title?: string; subject?: string; core?: string; knowledge?: string; mistakes?: number; risk?: string; masteryScore?: number }
 interface SI { name: string; weeklyHours?: number }
 interface QI { year?: string; subject?: string; number?: string; core?: string; knowledge?: string; result?: string }
@@ -44,9 +44,14 @@ export function parsePlanContent(c: string): PlanParsed {
   }).filter((t) => t.title).sort((a, b) => a.priority - b.priority).slice(0, MAXT);
   return { summary: String(o.summary ?? "").trim().slice(0, 200), tasks };
 }
-export async function handlePlanGenerate(req: Request, env: E): Promise<Response> {
-  const key = env.DEEPSEEK_API_KEY;
-  if (!key) return j({ ok: false, error: "no_api_key", message: "未配置 DEEPSEEK_API_KEY" }, 503);
+export async function handlePlanGenerate(req: Request, env: E | undefined): Promise<Response> {
+  // 支持任意 OpenAI 兼容网关：请求头（设置页配置）> 环境变量 > 默认 DeepSeek。
+  // 防御：vinext 本地/生产服务器调用 worker.fetch 时 env 可能为 undefined。
+  const e: E = env ?? {};
+  const key = req.headers.get("x-api-key")?.trim() || e.DEEPSEEK_API_KEY;
+  const baseUrl = req.headers.get("x-api-base-url")?.trim() || e.AI_BASE_URL || URL_;
+  const model = req.headers.get("x-api-model")?.trim() || e.AI_MODEL || MODEL;
+  if (!key) return j({ ok: false, error: "no_api_key", message: "未配置模型密钥" }, 503);
   let b: B;
   try { b = (await req.json()) as B } catch { return j({ ok: false, error: "bad_request" }, 400) }
   const subs = Array.isArray(b?.subjects) ? b.subjects.filter((s) => s && String(s.name || "").trim()) : [];
@@ -58,7 +63,7 @@ export async function handlePlanGenerate(req: Request, env: E): Promise<Response
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), TO);
   try {
-    const resp = await fetch(URL_, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ model: MODEL, messages: msgs(subs, kn, qs, done, days), response_format: { type: "json_object" }, temperature: 0.3, max_tokens: 1500 }), signal: ac.signal });
+    const resp = await fetch(baseUrl, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ model, messages: msgs(subs, kn, qs, done, days), response_format: { type: "json_object" }, temperature: 0.3, max_tokens: 1500 }), signal: ac.signal });
     if (!resp.ok) { const detail = await resp.text().catch(() => ""); return j({ ok: false, error: "upstream_error", status: resp.status, message: detail.slice(0, 300) }, 502) }
     const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
     const content = data?.choices?.[0]?.message?.content ?? "";

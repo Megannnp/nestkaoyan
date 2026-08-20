@@ -1,6 +1,6 @@
  "use client";
 
-import { useEffect, type Dispatch, type SetStateAction, type FormEvent } from "react";
+import { useEffect, useRef, type Dispatch, type SetStateAction, type FormEvent } from "react";
 import type {
   WorkspaceView, KnowledgePanel,
   ActiveDialog, DeletedBackup,
@@ -155,6 +155,15 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
     setChatHistoryOpen,
     setNotice,
   });
+
+  // 降级回复打字机动画 interval 引用：新动画前清旧、卸载时清理，防止泄漏
+  const chatFallbackTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  useEffect(() => {
+    return () => {
+      if (chatFallbackTimerRef.current) clearInterval(chatFallbackTimerRef.current);
+      chatFallbackTimerRef.current = undefined;
+    };
+  }, []);
 
   // 撤销最近一次删除（此前 setLastDeleted 记录了备份，但没有入口消费它）
   function rememberDeleted(next: DeletedBackup) {
@@ -1232,7 +1241,7 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
           core: n.core || "核心考点",
           branch: n.branch || "",
           knowledge: n.knowledge,
-          explanation: `AI 正式（DeepSeek）：${n.reason}`.slice(0, 300),
+          explanation: `AI 分析：${n.reason}`.slice(0, 300),
           prerequisite: "",
           related: "",
           masteryLevel: 0,
@@ -1245,10 +1254,10 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
           isMonthlyFocus: false,
         }));
       if (newNodes.length) setNodes((items) => [...newNodes, ...items]);
-      setPending((items) => [{ id: makeId("p"), kind: "图谱更新", title: `AI 正式分析：${subjectName} 高频考点`, subject: subjectName || "未分科", detail: `DeepSeek 识别 ${result.cores.length} 个核心、新增 ${newNodes.length} 个知识点；高频：${coreSummary || "—"}`, status: "待确认" }, ...items]);
-      setNotes((items) => [{ id: makeId("n"), title: `真题分析（AI 正式 · DeepSeek）：${subjectName}`, body: `高频核心：${coreSummary || "—"}\n建议知识点：\n${result.nodes.slice(0, 12).map((n) => `· ${n.core}/${n.knowledge}——${n.reason}`).join("\n")}`, tags: ["AI正式", "真题分析", subjectName] }, ...items]);
+      setPending((items) => [{ id: makeId("p"), kind: "图谱更新", title: `AI 正式分析：${subjectName} 高频考点`, subject: subjectName || "未分科", detail: `AI 识别 ${result.cores.length} 个核心、新增 ${newNodes.length} 个知识点；高频：${coreSummary || "—"}`, status: "待确认" }, ...items]);
+      setNotes((items) => [{ id: makeId("n"), title: `真题分析（AI 正式）：${subjectName}`, body: `高频核心：${coreSummary || "—"}\n建议知识点：\n${result.nodes.slice(0, 12).map((n) => `· ${n.core}/${n.knowledge}——${n.reason}`).join("\n")}`, tags: ["AI正式", "真题分析", subjectName] }, ...items]);
       setAgentSteps(steps.map((s) => ({ ...s, status: "完成" })));
-      pushSystem(`AI 正式分析完成（DeepSeek）：${result.cores.length} 个高频核心、新增 ${newNodes.length} 个知识点。`, "action");
+      pushSystem(`AI 正式分析完成：${result.cores.length} 个高频核心、新增 ${newNodes.length} 个知识点。`, "action");
     } else {
       // 降级演示（明确标注，不误导）
       const core = nodes.find((n) => n.subject === subjectName)?.core ?? "核心考点";
@@ -1272,11 +1281,11 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
       pushAssistant(`当前 ${subject || "科目"} 暂无已标记「错误」的真题，可在真题库做题记录中标记错题。`);
       return;
     }
-    pushSystem(`正在用 DeepSeek 分析 ${subject || "当前科目"} 的错因…`, "action");
+    pushSystem(`正在用 AI 分析 ${subject || "当前科目"} 的错因…`, "action");
     const result = await analyzeMistakes(subject, mistakes);
     if (result.ok && result.mistakes.length > 0) {
       const lines = result.mistakes.map((m) => `· ${m.reason}：${m.detail}（${m.questionRef}）→ ${m.suggestion}`).join("\n");
-      pushAssistant(`错因分析（AI 正式 · DeepSeek）：${result.summary}\n${lines}`);
+      pushAssistant(`错因分析（AI 正式）：${result.summary}\n${lines}`);
     } else {
       pushAssistant(`演示回复（${mistakesErrorReason(result.error)}，未接真模型）：近期错题集中在 ${mistakes[0]?.core || "核心考点"} 的适用条件判断，建议先重看条件再专项练习。`);
     }
@@ -1374,13 +1383,15 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
         // 失败 → 降级回复也逐字打字机输出（确保无 API key 时仍可见流式效果）
         const fallback = `演示回复（${chatErrorReason(result.error)}，未接真模型）：已收到你的问题「${text.slice(0, 30)}」。你可以让我安排任务、检索真题、分析错因或生成笔记。`;
         let idx = 0;
-        const timer = setInterval(() => {
+        if (chatFallbackTimerRef.current) clearInterval(chatFallbackTimerRef.current);
+        chatFallbackTimerRef.current = setInterval(() => {
           idx += 2;
           setChatSessions((items) => items.map((s) => s.id === sessionId
             ? { ...s, messages: s.messages.map((m) => m.id === placeholderMessage.id ? { ...m, content: fallback.slice(0, idx), updatedAt: new Date().toISOString() } : m) }
             : s));
           if (idx >= fallback.length) {
-            clearInterval(timer);
+            if (chatFallbackTimerRef.current) clearInterval(chatFallbackTimerRef.current);
+            chatFallbackTimerRef.current = undefined;
             setNotice("AI 回复生成失败，已展示演示回复");
           }
         }, 24);
@@ -1391,13 +1402,15 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
       // 亦逐字显示兜底回复
       const fallback = `演示回复（未接真模型）：已收到你的问题「${text.slice(0, 30)}」。`;
       let idx = 0;
-      const timer = setInterval(() => {
+      if (chatFallbackTimerRef.current) clearInterval(chatFallbackTimerRef.current);
+      chatFallbackTimerRef.current = setInterval(() => {
         idx += 2;
         setChatSessions((items) => items.map((s) => s.id === sessionId
           ? { ...s, messages: s.messages.map((m) => m.id === placeholderMessage.id && !m.content ? { ...m, content: fallback.slice(0, idx), updatedAt: new Date().toISOString() } : m) }
           : s));
         if (idx >= fallback.length) {
-          clearInterval(timer);
+          if (chatFallbackTimerRef.current) clearInterval(chatFallbackTimerRef.current);
+          chatFallbackTimerRef.current = undefined;
         }
       }, 24);
     }

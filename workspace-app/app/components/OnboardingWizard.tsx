@@ -367,16 +367,16 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
             <div>
               <h2 className="text-[18px] font-bold text-[#18181B] mb-1">添加 API Key <span className="text-[12px] font-normal text-[#A1A1AA]">（可跳过）</span></h2>
               <p className="text-[13px] text-[#71717A] mb-4">
-                填入你的 DeepSeek API Key，让 AI 阅读讲解、计划分析等真实模型功能可用。密钥仅保存在本机浏览器，通过服务端转发调用，不会明文暴露。
+                填入你的 AI API Key（支持**任意 OpenAI 兼容网关**：DeepSeek / 通义千问 / Kimi / Ollama 本地模型等），让 AI 阅读讲解、计划分析等真实模型功能可用。密钥仅保存在本机浏览器，通过服务端转发调用，不会明文暴露。
               </p>
 
               <div className="mb-3">
-                <label className={`${labelCls}`}>DeepSeek API Key</label>
+                <label className={`${labelCls}`}>AI API Key（OpenAI 兼容网关）</label>
                 <input
                   className={inputCls}
                   type="password"
                   autoComplete="off"
-                  placeholder="sk-…（在 https://platform.deepseek.com/api_keys 申请）"
+                  placeholder="sk-…（DeepSeek 在 platform.deepseek.com 申请；本地 Ollama 可留空）"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                 />

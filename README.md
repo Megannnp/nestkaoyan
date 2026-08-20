@@ -52,7 +52,6 @@ npm run deploy                 # 上线 Cloudflare Workers
 
 - **授权**：双轨——个人 / 学生 / 教育 / 非营利**免费**使用、修改、再分发（保留版权声明）；**商用需购买授权**。详见 [LICENSE](./LICENSE)。
 - **真题 PDF 不含在仓库**（版权材料，见 `workspace-app/public/papers/README.md` 放置规范）
-- **测试**：单元 111/111 ✅ · E2E 68/68 ✅（Playwright）
+- **测试**：单元 113/113 ✅ · E2E 68/68 ✅（Playwright）
 
 © 2026 重庆语梦筑巢科技有限责任公司 · 筑巢考研工作台™
-

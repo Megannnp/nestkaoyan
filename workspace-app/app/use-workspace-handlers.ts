@@ -157,6 +157,13 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
   });
 
   // 撤销最近一次删除（此前 setLastDeleted 记录了备份，但没有入口消费它）
+  function rememberDeleted(next: DeletedBackup) {
+    if (lastDeleted?.collection === "resources" && lastDeleted.item.fileStorageKey && lastDeleted.item.kind !== "demo") {
+      void deletePdfFile(lastDeleted.item.fileStorageKey);
+    }
+    setLastDeleted(next);
+  }
+
   function restoreLastDeleted() {
     if (!lastDeleted) return;
     const backup = lastDeleted;
@@ -603,15 +610,11 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
   }
 
   function deleteResource(item: Resource) {
-    setLastDeleted({ collection: "resources", item, label: item.name });
+    rememberDeleted({ collection: "resources", item, label: item.name });
     setResources((items) => items.filter((resource) => resource.id !== item.id));
     setMaterials((items) => items.filter((material) => material.id !== item.id));
     setMaterialSections((items) => items.filter((section) => section.materialId !== item.id));
     setQuestions((items) => items.filter((question) => question.materialId !== item.id));
-    // Stabilization 1A-6: 同步清理 IndexedDB 中的文件二进制（pdf / docx / text / image 都存了 Blob）
-    if (item.fileStorageKey && item.kind && item.kind !== "demo") {
-      deletePdfFile(item.fileStorageKey).catch(() => {});
-    }
     // 清理关联批注
     setAnnotations((items) => items.filter((annotation) => annotation.resourceId !== item.id));
     setNotice(`已删除资源：${item.name}`);
@@ -647,13 +650,13 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
   }
 
   function deleteQuestion(item: Question) {
-    setLastDeleted({ collection: "questions", item, label: `${item.year} 第 ${item.number} 题` });
+    rememberDeleted({ collection: "questions", item, label: `${item.year} 第 ${item.number} 题` });
     setQuestions((items) => items.filter((question) => question.id !== item.id));
     setNotice(`已删除真题：${item.year} 第 ${item.number} 题`);
   }
 
   function deleteNode(item: KnowledgeNode) {
-    setLastDeleted({ collection: "nodes", item, label: item.knowledge });
+    rememberDeleted({ collection: "nodes", item, label: item.knowledge });
     setNodes((items) => items.filter((node) => node.id !== item.id));
     setNotice(`已删除知识点：${item.knowledge}`);
   }
@@ -783,7 +786,7 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
   }
 
   function deleteCard(item: GrowthCard) {
-    setLastDeleted({ collection: "cards", item, label: item.title });
+    rememberDeleted({ collection: "cards", item, label: item.title });
     setCards((items) => items.filter((card) => card.id !== item.id));
     setNotice(`已删除卡片：${item.title}`);
   }

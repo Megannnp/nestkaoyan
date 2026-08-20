@@ -7,6 +7,7 @@ import {
   appendMessage,
   migrateLegacyChat,
 } from "../app/lib/chat.ts";
+import { chatCompleteStream } from "../app/lib/ai/chat-complete.ts";
 
 test("migrateLegacyChat：旧 chat 数组迁移为单一 Session，字段规范化", () => {
   const fixedNow = 1785680409838;
@@ -82,4 +83,28 @@ test("classifyPromptIntent：错因分析匹配收紧——口语含「错/不�
   assert.deepEqual(classifyPromptIntent("为什么总错这类题"), { type: "mistake-analysis" });
   assert.deepEqual(classifyPromptIntent("这题不会做"), { type: "mistake-analysis" });
   assert.deepEqual(classifyPromptIntent("错题分析"), { type: "mistake-analysis" });
+});
+
+test("chatCompleteStream：非流式 JSON 成功响应也触发 onDelta", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify({ ok: true, provider: "gateway", content: "正常" }),
+    { headers: { "content-type": "application/json; charset=utf-8" } },
+  );
+
+  let streamed = "";
+  let doneContent = "";
+  try {
+    await chatCompleteStream({
+      system: "test",
+      user: "ping",
+      onDelta: (delta) => { streamed += delta; },
+      onDone: (result) => { doneContent = result.content ?? ""; },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(streamed, "正常");
+  assert.equal(doneContent, "正常");
 });

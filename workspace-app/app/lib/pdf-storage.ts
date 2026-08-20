@@ -148,6 +148,14 @@ export async function garbageCollectServerFiles(activeKeys: ReadonlyArray<string
   }
 }
 
+/** 服务端文件 GC 使用：主文件 + DOCX/TXT 解析文本 sidecar 都视为 active。 */
+export function fileStorageKeysForServerGc(resources: ReadonlyArray<{ fileStorageKey?: string }>): string[] {
+  return resources.flatMap((resource) => {
+    const key = resource.fileStorageKey;
+    return key ? [key, `${key}${DOCX_TEXT_KEY_SUFFIX}`] : [];
+  });
+}
+
 /** 保存 PDF 文件到 IndexedDB */
 export async function savePdfFile(file: File): Promise<{ fileStorageKey: string; size: number; mimeType: string }> {
   const fileStorageKey = `pdf-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;

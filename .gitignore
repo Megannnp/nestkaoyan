@@ -25,6 +25,10 @@ workspace-app/public/cmaps/
 *.tsbuildinfo
 
 # 密钥与环境（绝不入 Git）
+.env*
+!.env.example
+.dev.vars
+.dev.vars.*
 workspace-app/.dev.vars
 workspace-app/.dev.vars.*
 workspace-app/.env*

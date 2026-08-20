@@ -92,7 +92,7 @@ npm run deploy            # 上线 Cloudflare Workers
 ## 测试
 
 ```bash
-npm run test:unit   # 单元测试（111/111）
+npm run test:unit   # 单元测试（113/113）
 npm test            # 构建 + 渲染冒烟
 npx playwright test # E2E（68/68，需 dev server）
 ```
@@ -123,8 +123,7 @@ workspace-app/
 ├── app/                  # 前端 React（页面 + 组件 + 状态）
 │   ├── components/       #   UI 组件（Sidebar/ReaderPanel/ChatPanel 等）
 │   └── lib/              #   状态管理/reducer/storage/类型/AI 客户端层
-├── worker/               # 后端 Cloudflare Worker（AI 路由 + API）
-│   └── ai/               #   任意 OpenAI 兼容网关调用（analyze-exam/plan-generate 等）
+├── worker/               # 后端 Cloudflare Worker（AI 路由 + API + OpenAI 兼容网关）
 ├── database/             # 本地 SQLite 同步服务（server.mjs，零依赖 node:sqlite）
 ├── db/ + drizzle/        # Drizzle schema 与 SQL 迁移（D1 可选）
 ├── tests/                # 单测 + E2E（Playwright）

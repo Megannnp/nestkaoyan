@@ -175,6 +175,10 @@ export async function chatCompleteStream(options: ChatStreamOptions): Promise<vo
         finish({ ok: false, error: data?.error ?? "empty_response", message: data?.message });
         return;
       }
+      if (data.content) {
+        full = data.content;
+        onDelta?.(data.content);
+      }
       finish({ ok: true, provider: data.provider, content: data.content ?? "" });
       return;
     }

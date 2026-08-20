@@ -127,6 +127,24 @@ export async function handleChatComplete(request: Request, env: ChatEnv | undefi
       return json({ ok: false, error: "empty_response", message: "模型无返回内容" }, 502);
     }
 
+    // 2026-08-20：兼容非流式网关（部分 OpenAI 兼容实现/本地代理不支持 stream:true）。
+    // 检测上游 content-type，非 event-stream 时按 OpenAI JSON 响应解析后直接返回，
+    // 前端 chatCompleteStream 已有非流式 JSON 兼容分支。
+    const upstreamCt = resp.headers.get("content-type") ?? "";
+    if (!upstreamCt.includes("text/event-stream")) {
+      const text = await resp.text();
+      let content = text;
+      try {
+        const data = JSON.parse(text) as { choices?: { message?: { content?: string } }[] };
+        if (data?.choices?.[0]?.message && typeof data.choices[0].message.content === "string") {
+          content = data.choices[0].message.content;
+        }
+      } catch {
+        // 非 JSON（如纯文本响应）→ 原样返回
+      }
+      return json({ ok: true, provider: "gateway", content }, 200);
+    }
+
     return new Response(buildSseStream(resp.body), {
       headers: {
         "content-type": "text/event-stream; charset=utf-8",

@@ -16,7 +16,7 @@ import {
 } from "./lib/default-data";
 import { TOAST_DURATION } from "./lib/rules";
 import { hydrateWorkspace, saveWorkspace, buildWorkspaceSnapshot, fetchServerWorkspace, readLocalSavedAt, fetchServerWorkspaceMeta, isServerNewerThanLocal } from "./lib/storage";
-import { restoreMissingFilesFromServer, garbageCollectServerFiles } from "./lib/pdf-storage";
+import { restoreMissingFilesFromServer, garbageCollectServerFiles, fileStorageKeysForServerGc, deletePdfFile } from "./lib/pdf-storage";
 import { syncAiConfigFromServer } from "./lib/ai/chat-complete";
 import { loadLearningEvents, type LearningEvent } from "./lib/events";
 import { computeReplayComparison, computeProgressComparison } from "./lib/replay-console";
@@ -426,10 +426,15 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  // ─── 删除撤销窗口：约 8 秒后关闭撤销入口 ───
+  // ─── 删除撤销窗口：约 8 秒后关闭撤销入口，资源文件等窗口结束再清理 ───
   useEffect(() => {
     if (!lastDeleted) return;
-    const timer = setTimeout(() => setLastDeleted(null), 8000);
+    const timer = setTimeout(() => {
+      if (lastDeleted.collection === "resources" && lastDeleted.item.fileStorageKey && lastDeleted.item.kind !== "demo") {
+        void deletePdfFile(lastDeleted.item.fileStorageKey);
+      }
+      setLastDeleted(null);
+    }, 8000);
     return () => clearTimeout(timer);
   }, [lastDeleted]);
 
@@ -532,7 +537,7 @@ export default function Home() {
       if (data.resources?.length) {
         void restoreMissingFilesFromServer(data.resources);
         // 服务端孤儿文件 GC（崩溃残留/删除镜像失败兜底）
-        void garbageCollectServerFiles(data.resources.map((r) => r.fileStorageKey).filter((k): k is string => Boolean(k)));
+        void garbageCollectServerFiles(fileStorageKeysForServerGc(data.resources));
       }
       // AI 网关配置跨设备拉取（本机未配置时从服务端取回）
       void syncAiConfigFromServer();

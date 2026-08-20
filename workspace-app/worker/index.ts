@@ -5,7 +5,7 @@ import { handleAnalyzeExam } from "./analyze-exam";
 import { handleAnalyzeMistakes } from "./analyze-mistakes";
 import { handlePlanGenerate } from "./plan-generate";
 import { handleChatComplete } from "./chat-complete";
-import { handleWorkspace } from "./workspace";
+import { handleWorkspace, handleAiKey } from "./workspace";
 import { handleFiles } from "./files";
 import {
   authConfig, isLocalRequest, isSessionValid, sessionTokenFor,
@@ -132,6 +132,10 @@ const worker = {
 
     if (url.pathname === "/api/workspace") {
       return handleWorkspace(request, env);
+    }
+
+    if (url.pathname === "/api/ai-key") {
+      return handleAiKey(request, env);
     }
 
     if (url.pathname.startsWith("/api/files/")) {

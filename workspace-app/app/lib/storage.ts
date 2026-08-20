@@ -327,8 +327,43 @@ export function saveWorkspace(snapshot: Omit<WorkspaceSnapshot, "storageVersion"
   const withVersion: WorkspaceSnapshot = {
     ...snapshot,
     storageVersion: STORAGE_VERSION,
+    // 本地保存时间戳（用于与服务端 updatedAt 比较新鲜度，检测多设备更新）
+    savedAt: new Date().toISOString(),
   };
   const ok = writeRaw(WORKSPACE_KEY, withVersion);
   if (ok) mirrorWorkspaceToD1(withVersion);
   return ok;
+}
+
+/** 读取本地快照的 savedAt（用于与服务端 updatedAt 比较新鲜度） */
+export function readLocalSavedAt(): string | null {
+  const raw = window.localStorage.getItem(WORKSPACE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { savedAt?: unknown };
+    return typeof parsed.savedAt === "string" ? parsed.savedAt : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 获取服务端快照元信息（updatedAt/storageVersion），用于多设备新鲜度检测 */
+export async function fetchServerWorkspaceMeta(): Promise<{ updatedAt: string; storageVersion: number } | null> {
+  try {
+    const res = await fetch("/api/workspace", { method: "GET" });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      ok?: boolean;
+      snapshot?: unknown;
+      updatedAt?: unknown;
+      storageVersion?: unknown;
+    };
+    if (!body?.ok || !body.snapshot) return null;
+    return {
+      updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
+      storageVersion: typeof body.storageVersion === "number" ? body.storageVersion : 0,
+    };
+  } catch {
+    return null;
+  }
 }

@@ -15,8 +15,9 @@ import {
   CORE_NAMES, QUICK_PROMPTS, MASTERY_OPTIONS, MOOD_OPTIONS,
 } from "./lib/default-data";
 import { TOAST_DURATION } from "./lib/rules";
-import { hydrateWorkspace, saveWorkspace, buildWorkspaceSnapshot, fetchServerWorkspace } from "./lib/storage";
-import { restoreMissingFilesFromServer } from "./lib/pdf-storage";
+import { hydrateWorkspace, saveWorkspace, buildWorkspaceSnapshot, fetchServerWorkspace, readLocalSavedAt, fetchServerWorkspaceMeta } from "./lib/storage";
+import { restoreMissingFilesFromServer, garbageCollectServerFiles } from "./lib/pdf-storage";
+import { syncApiKeyFromServer } from "./lib/ai/chat-complete";
 import { loadLearningEvents, type LearningEvent } from "./lib/events";
 import { computeReplayComparison, computeProgressComparison } from "./lib/replay-console";
 import { projectKnowledgeState } from "./lib/projection";
@@ -66,6 +67,8 @@ export default function Home() {
   const [appReady, setAppReady] = useState(false);
   // 私有部署访问密码门（KAOYAN_AUTH=1 且未授权时显示登录遮罩）
   const [authGate, setAuthGate] = useState<{ required: boolean; ok: boolean }>({ required: false, ok: true });
+  // 多设备新鲜度：服务端快照比本机更新时提示（防止静默覆盖其他设备的数据）
+  const [serverNewer, setServerNewer] = useState(false);
   // ─── Dashboard: Hydration-safe date (SSR: fixed; mount: real) ───
   // 必须在派生值（dueCards 等）之前声明，否则 TDZ ReferenceError
   const [hydratedTodayStr, setHydratedTodayStr] = useState("");
@@ -528,6 +531,20 @@ export default function Home() {
       // SQLite/D1 同步模式：拉回缺失的 PDF/文本二进制（换浏览器/清缓存后自动恢复）
       if (data.resources?.length) {
         void restoreMissingFilesFromServer(data.resources);
+        // 服务端孤儿文件 GC（崩溃残留/删除镜像失败兜底）
+        void garbageCollectServerFiles(data.resources.map((r) => r.fileStorageKey).filter((k): k is string => Boolean(k)));
+      }
+      // AI 密钥跨设备拉取（本机无 key 时从服务端取回）
+      void syncApiKeyFromServer();
+      // 多设备新鲜度：服务端快照更新于本地 → 提示用户选择载入（防止静默覆盖）
+      const localSavedAt = readLocalSavedAt();
+      if (localSavedAt) {
+        void fetchServerWorkspaceMeta().then((meta) => {
+          if (!meta?.updatedAt) return;
+          const serverTime = new Date(meta.updatedAt.replace(" ", "T") + "Z").getTime();
+          const localTime = new Date(localSavedAt).getTime();
+          if (Number.isFinite(serverTime) && serverTime > localTime) setServerNewer(true);
+        });
       }
       if (data.materials && Array.isArray(data.materials)) {
         setMaterials(data.materials);
@@ -669,6 +686,40 @@ export default function Home() {
     <main>
       {authGate.required && !authGate.ok && (
         <LoginOverlay onSuccess={() => window.location.reload()} />
+      )}
+      {serverNewer && (
+        <div
+          role="dialog"
+          aria-label="检测到服务端更新"
+          className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/30"
+        >
+          <div className="max-w-sm w-full rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-base font-semibold mb-2">检测到其他设备有更新的数据</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              服务端快照比本机更新（可能来自另一台设备）。载入服务端版本后，本机未同步的本地改动将被服务端数据覆盖。
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setServerNewer(false)}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm text-gray-700"
+              >
+                保留本地
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void fetchServerWorkspace().then((s) => {
+                    if (s) window.location.reload();
+                  });
+                }}
+                className="px-3 py-1.5 rounded-lg bg-amber-700 text-sm text-white"
+              >
+                载入服务端
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {!appReady && (
         <div

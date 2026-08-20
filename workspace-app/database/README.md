@@ -39,6 +39,9 @@
 | GET | `/files/:key` | 下载文件二进制流 |
 | HEAD | `/files/:key` | 文件存在性检查（200/404） |
 | DELETE | `/files/:key` | 删除文件（幂等） |
+| POST | `/files/gc` | 孤儿文件 GC：删除不在 active 列表中的文件（崩溃残留兜底） |
+| GET | `/ai-key` | 读取 AI 密钥（跨设备同步，受访问密码保护） |
+| PUT | `/ai-key` | 保存 AI 密钥（body `{ key }`） |
 
 > key 仅允许 `[A-Za-z0-9._:-]`，防路径穿越；单文件上限 `MAX_FILE_BYTES`（默认 200MB）。
 
@@ -50,6 +53,7 @@
 | `HOST` | `127.0.0.1` | 监听地址（默认仅本机，防止数据接口直连暴露；Docker 内部网络设 `0.0.0.0`） |
 | `DB_PATH` | `./data/kaoyan.db` | SQLite 文件路径（Docker 挂卷到 `/app/data`） |
 | `MAX_FILE_BYTES` | `200MB` | 单文件上传上限 |
+| `MAX_WORKSPACE_BYTES` | `50MB` | 工作区快照上限（防超大数据撑爆库） |
 
 ### 表结构（与 D1 一致，`db/schema.ts` 已定义）
 

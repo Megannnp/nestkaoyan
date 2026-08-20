@@ -132,6 +132,22 @@ export async function restoreMissingFilesFromServer(
   }
 }
 
+/**
+ * 服务端孤儿文件 GC：删除磁盘上不在 active 列表中的文件（崩溃残留/删除镜像失败兜底）。
+ * 在恢复/加载后调用；无后端时静默。
+ */
+export async function garbageCollectServerFiles(activeKeys: ReadonlyArray<string>): Promise<void> {
+  try {
+    await fetch("/api/files/gc", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(activeKeys),
+    });
+  } catch {
+    /* 静默 */
+  }
+}
+
 /** 保存 PDF 文件到 IndexedDB */
 export async function savePdfFile(file: File): Promise<{ fileStorageKey: string; size: number; mimeType: string }> {
   const fileStorageKey = `pdf-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;

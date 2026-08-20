@@ -19,6 +19,36 @@ export function setStoredApiKey(key: string): void {
   } catch { /* localStorage 不可用（隐私模式）时静默 */ }
 }
 
+/** 服务端密钥同步（跨设备；存 SQLite meta 表，受访问密码保护） */
+
+/** 拉取：本机无密钥时从服务端取回（换设备自动同步） */
+export async function syncApiKeyFromServer(): Promise<void> {
+  try {
+    if (getStoredApiKey()) return;
+    const res = await fetch("/api/ai-key", { method: "GET" });
+    if (!res.ok) return;
+    const body = (await res.json()) as { ok?: boolean; key?: unknown };
+    if (body?.ok && typeof body.key === "string" && body.key.trim()) {
+      setStoredApiKey(body.key);
+    }
+  } catch {
+    /* 无后端/离线：静默 */
+  }
+}
+
+/** 推送：保存密钥时镜像到服务端（换设备可用） */
+export async function mirrorApiKeyToServer(): Promise<void> {
+  try {
+    await fetch("/api/ai-key", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: getStoredApiKey() }),
+    });
+  } catch {
+    /* 无后端/离线：静默 */
+  }
+}
+
 export interface ChatCompleteResult {
   ok: boolean;
   provider?: string;

@@ -3,7 +3,7 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import type { AppSettings, ExamGoal, Subject } from "../lib/types";
 import { NEW_SUBJECT_TEMPLATE, getDefaultMaxScore } from "../lib/subject-utils";
-import { getStoredApiKey, setStoredApiKey } from "../lib/ai/chat-complete";
+import { getStoredApiKey, setStoredApiKey, mirrorApiKeyToServer } from "../lib/ai/chat-complete";
 import { chatCompleteStream, chatErrorReason } from "../lib/ai/chat-complete";
 import styles from "../../styles/components.module.css";
 
@@ -55,6 +55,7 @@ export function SettingsPanel({
     setKeyStatus(null);
     try {
       setStoredApiKey(apiKey);
+      void mirrorApiKeyToServer(); // 跨设备同步（存服务端，受访问密码保护）
       let responded = false;
       const done = new Promise<{ ok: boolean; error?: string }>((resolve) => {
         void chatCompleteStream({

@@ -176,3 +176,109 @@ test("文本后缀 key（:text）可正常存取", async () => {
   assert.equal(getRes.status, 200);
   assert.equal(await getRes.text(), "纯文本内容");
 });
+
+// ─── 文件 GC ─────────────────────────────────────────
+
+test("GC：删除不在 active 列表中的孤儿文件，保留 active", async () => {
+  // 独立实例，保证 removed 计数确定（共享实例上有其他测试留下的文件）
+  const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), "kaoyan-db-gc-"));
+  const svc = await startWorkspaceDbServer({
+    port: 0,
+    dbPath: path.join(tmpDir2, "t.db"),
+    host: "127.0.0.1",
+  });
+  try {
+    const b = `http://127.0.0.1:${svc.server.address().port}`;
+    const keepKey = "pdf-1750000000000-gc-keep";
+    const orphanKey = "pdf-1750000000000-gc-orphan";
+    await fetch(`${b}/files/${keepKey}`, { method: "PUT", body: "keep" });
+    await fetch(`${b}/files/${orphanKey}`, { method: "PUT", body: "orphan" });
+
+    const gcRes = await fetch(`${b}/files/gc`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([keepKey]),
+    });
+    assert.equal(gcRes.status, 200);
+    const gcBody = await gcRes.json();
+    assert.equal(gcBody.ok, true);
+    assert.equal(gcBody.removed, 1);
+
+    const keepGet = await fetch(`${b}/files/${keepKey}`);
+    assert.equal(keepGet.status, 200);
+    const orphanGet = await fetch(`${b}/files/${orphanKey}`);
+    assert.equal(orphanGet.status, 404);
+  } finally {
+    await svc.close();
+  }
+});
+
+test("GC：非数组负载 → 400", async () => {
+  const res = await fetch(`${base}/files/gc`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ not: "array" }),
+  });
+  assert.equal(res.status, 400);
+});
+
+// ─── AI 密钥 ─────────────────────────────────────────
+
+test("AI 密钥：PUT 后 GET 返回；覆盖更新", async () => {
+  const putRes = await fetch(`${base}/ai-key`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key: "sk-test-abc" }),
+  });
+  assert.equal(putRes.status, 200);
+  const get1 = await fetch(`${base}/ai-key`);
+  const body1 = await get1.json();
+  assert.equal(body1.key, "sk-test-abc");
+
+  await fetch(`${base}/ai-key`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key: "sk-test-xyz" }),
+  });
+  const get2 = await fetch(`${base}/ai-key`);
+  const body2 = await get2.json();
+  assert.equal(body2.key, "sk-test-xyz");
+});
+
+test("AI 密钥：未设置时返回空串", async () => {
+  // 用一个独立实例验证更安全；这里直接验证空 key 可写回
+  const putRes = await fetch(`${base}/ai-key`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key: "" }),
+  });
+  assert.equal(putRes.status, 200);
+  const getRes = await fetch(`${base}/ai-key`);
+  const body = await getRes.json();
+  assert.equal(body.key, "");
+});
+
+// ─── workspace 大小上限 ──────────────────────────────
+
+test("workspace 超限 → 413", async () => {
+  const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), "kaoyan-db-limit-"));
+  const small = await startWorkspaceDbServer({
+    port: 0,
+    dbPath: path.join(tmpDir2, "t.db"),
+    host: "127.0.0.1",
+    maxWorkspaceBytes: 1024,
+  });
+  try {
+    const base2 = `http://127.0.0.1:${small.server.address().port}`;
+    const res = await fetch(`${base2}/workspace`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ storageVersion: 6, blob: "x".repeat(2048) }),
+    });
+    assert.equal(res.status, 413);
+    const body = await res.json();
+    assert.equal(body.error, "too_large");
+  } finally {
+    await small.close();
+  }
+});

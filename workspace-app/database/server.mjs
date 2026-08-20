@@ -64,6 +64,8 @@ export async function startWorkspaceDbServer({
   dbPath = defaultDbPath(),
   // 默认仅本机：局域网访问一律经应用层（worker）代理并做密码认证，避免数据接口直接暴露
   host = process.env.HOST || "127.0.0.1",
+  maxWorkspaceBytes = Number(process.env.MAX_WORKSPACE_BYTES || 50 * 1024 * 1024),
+  maxFileBytes = Number(process.env.MAX_FILE_BYTES || 200 * 1024 * 1024),
 } = {}) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
@@ -75,11 +77,18 @@ export async function startWorkspaceDbServer({
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meta (
+      k TEXT PRIMARY KEY,
+      v TEXT NOT NULL
+    )
+  `);
 
   // ── 文件存储（PDF/DOCX/文本二进制，独立于 SQLite）────────────────
   const filesDir = path.join(path.dirname(dbPath), "files");
   fs.mkdirSync(filesDir, { recursive: true });
-  const MAX_FILE_BYTES = Number(process.env.MAX_FILE_BYTES || 200 * 1024 * 1024);
+  const MAX_FILE_BYTES = maxFileBytes;
+  const MAX_WORKSPACE_BYTES = maxWorkspaceBytes;
 
   /** 校验并映射文件 key → 磁盘安全文件名（base64url 转码，防路径穿越） */
   function filePathFor(key) {
@@ -173,6 +182,8 @@ export async function startWorkspaceDbServer({
         }
 
         if (req.method === "PUT") {
+          const contentLength = Number(req.headers["content-length"] || 0);
+          if (contentLength > MAX_WORKSPACE_BYTES) return json(res, 413, { ok: false, error: "too_large" });
           const raw = await readBody(req);
           let snapshot;
           try {
@@ -195,6 +206,61 @@ export async function startWorkspaceDbServer({
           return json(res, 200, { ok: true });
         }
 
+        return json(res, 405, { ok: false, error: "method_not_allowed" });
+      }
+
+      // ── 文件 GC（清理孤儿：磁盘上存在但不在 active 列表中的文件）──
+      if (url.pathname === "/files/gc" && req.method === "POST") {
+        const raw = await readBody(req);
+        let active;
+        try {
+          active = JSON.parse(raw);
+        } catch {
+          return json(res, 400, { ok: false, error: "bad_json" });
+        }
+        if (!Array.isArray(active)) return json(res, 400, { ok: false, error: "bad_request" });
+        const activeSet = new Set(active.filter((k) => typeof k === "string"));
+        let removed = 0;
+        for (const entry of fs.readdirSync(filesDir)) {
+          let key;
+          try {
+            key = Buffer.from(entry, "base64url").toString("utf8");
+          } catch {
+            key = entry;
+          }
+          if (!activeSet.has(key)) {
+            try {
+              fs.unlinkSync(path.join(filesDir, entry));
+              removed += 1;
+            } catch {
+              /* 忽略删除失败 */
+            }
+          }
+        }
+        return json(res, 200, { ok: true, removed });
+      }
+
+      // ── AI 密钥（跨设备同步；随工作区密码保护，不入工作区快照/导出）──
+      if (url.pathname === "/ai-key") {
+        if (req.method === "GET") {
+          const row = db.prepare("select v from meta where k = 'deepseek_api_key'").get();
+          return json(res, 200, { ok: true, key: row?.v ?? "" });
+        }
+        if (req.method === "PUT") {
+          const raw = await readBody(req);
+          let body;
+          try {
+            body = JSON.parse(raw);
+          } catch {
+            return json(res, 400, { ok: false, error: "bad_json" });
+          }
+          const key = typeof body?.key === "string" ? body.key : "";
+          db.prepare(
+            `insert into meta (k, v) values ('deepseek_api_key', ?)
+             on conflict(k) do update set v = excluded.v`
+          ).run(key);
+          return json(res, 200, { ok: true });
+        }
         return json(res, 405, { ok: false, error: "method_not_allowed" });
       }
 

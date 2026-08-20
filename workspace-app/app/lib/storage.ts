@@ -279,6 +279,29 @@ export function hydrateWorkspace(): WorkspaceSnapshot | null {
 }
 
 /**
+ * 服务端工作区拉取（SQLite / D1 同步模式）：
+ * 本地无存档（首次打开 / 换浏览器 / 清缓存）时，从服务端恢复最近一次保存的工作区快照，
+ * 并写入本地 localStorage。任何失败都静默降级为空态（保持纯本地模式可用）。
+ */
+export async function fetchServerWorkspace(): Promise<WorkspaceSnapshot | null> {
+  try {
+    const res = await fetch("/api/workspace", { method: "GET" });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { ok?: boolean; snapshot?: unknown; storageVersion?: number };
+    if (!body?.ok || !body.snapshot || typeof body.snapshot !== "object") return null;
+    const ver = typeof body.storageVersion === "number" ? body.storageVersion : 0;
+    // 只读保护：服务端版本高于当前构建 → 拒绝降级读取（避免旧构建覆盖新数据）
+    if (ver > STORAGE_VERSION) return null;
+    const snapshot = body.snapshot as WorkspaceSnapshot;
+    // 写入本地（saveWorkspace 内部有版本守卫）；写失败则放弃
+    if (!saveWorkspace(snapshot as Omit<WorkspaceSnapshot, "storageVersion">)) return null;
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 唯一 save 入口：写入 v5（带 storageVersion）。
  * 写失败 → 返回 false（不覆盖已有数据），由调用方提示用户。
  * 写前版本守卫：磁盘已是更高版本 → 拒写返回 false（与读侧 hydrateWorkspace 对称，

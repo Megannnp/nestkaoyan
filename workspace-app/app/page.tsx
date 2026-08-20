@@ -15,7 +15,7 @@ import {
   CORE_NAMES, QUICK_PROMPTS, MASTERY_OPTIONS, MOOD_OPTIONS,
 } from "./lib/default-data";
 import { TOAST_DURATION } from "./lib/rules";
-import { hydrateWorkspace, saveWorkspace, buildWorkspaceSnapshot } from "./lib/storage";
+import { hydrateWorkspace, saveWorkspace, buildWorkspaceSnapshot, fetchServerWorkspace } from "./lib/storage";
 import { loadLearningEvents, type LearningEvent } from "./lib/events";
 import { computeReplayComparison, computeProgressComparison } from "./lib/replay-console";
 import { projectKnowledgeState } from "./lib/projection";
@@ -467,7 +467,15 @@ export default function Home() {
     const data = hydrateWorkspace();
     setBootChecked(true);
     if (!data) {
-      requestAnimationFrame(() => requestAnimationFrame(() => setAppReady(true)));
+      // 本地无存档：尝试从服务端 SQLite/D1 恢复（换浏览器/换设备场景；失败则静默进入新用户）
+      fetchServerWorkspace().then((remote) => {
+        if (remote) {
+          // 已写入 localStorage → 整页重载走正常 hydrate 路径（与「导入数据」恢复方式一致）
+          window.location.reload();
+          return;
+        }
+        requestAnimationFrame(() => requestAnimationFrame(() => setAppReady(true)));
+      });
       return; // 无任何存档 → 新用户，onboardingCompleted 保持 false → 显示初始化向导
     }
     try {

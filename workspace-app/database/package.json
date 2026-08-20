@@ -1,0 +1,13 @@
+{
+  "name": "kaoyan-db",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "筑巢考研工作台 — 本地 SQLite 工作区同步服务（零依赖，基于 node:sqlite）",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

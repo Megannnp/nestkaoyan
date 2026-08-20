@@ -37,7 +37,7 @@ cd 你的项目文件夹路径
 docker compose up -d
 ```
 
-首次会自动构建镜像（约 3~5 分钟，之后秒开）。
+首次会自动构建两个镜像（约 3~5 分钟，之后秒开）：`kaoyan-exam-workspace`（应用）和 `kaoyan-db`（本地 SQLite 数据库）。
 
 > ✅ 出现 `Started` 或 `Container ... Started`。
 > ❌ 报错？贴日志到 Issue，或 `docker compose down && docker compose up -d --build` 重试。
@@ -45,6 +45,10 @@ docker compose up -d
 ### A3. 打开使用
 
 浏览器访问 **http://localhost:3000**
+
+> 💡 **数据持久化**：Docker 模式自动启用本地 SQLite（`kaoyan-db` 容器），工作区数据存于数据卷 `kaoyan-data`——
+> **换浏览器、清缓存、换设备（同一局域网）数据都不会丢**，首次打开自动从服务端恢复。
+> 备份 = 直接拷贝 SQLite 数据文件（或备份数据卷）。
 
 > 💡 真题 PDF：放到项目里新建的 `papers/` 文件夹（与 `public/papers/README.md` 的命名规范一致），刷新即自动出现。
 
@@ -151,6 +155,6 @@ npm run deploy
 | 端口被占用 | 换端口：`PORT=3100 npm run start`（路 B）或改 docker-compose.yml 的 `3000:3000` 为 `3100:3000` |
 | 手机打不开电脑的 localhost | 手机连同一 WiFi，访问 `http://电脑IP:3000`（macOS 终端 `ipconfig getifaddr en0` 查 IP） |
 | AI 提示"演示回复" | 在「设置 → AI 学习助手」填入你的 DeepSeek key（key 只存本机） |
-| 数据会丢吗 | 数据在浏览器 localStorage；换设备/清缓存前先在「设置 → 数据管理 → 导出学习档案」备份 |
-| 想用数据库 / 多端同步 | 见 [DEPLOY.md](./DEPLOY.md)「可选：启用 D1」 |
+| 数据会丢吗 | 路 A（Docker）数据存本地 SQLite，换浏览器/清缓存不丢；路 B/C 数据在浏览器 localStorage，换设备/清缓存前先「设置 → 数据管理 → 导出学习档案」备份 |
+| 想用数据库 / 多端同步 | Docker 模式已内置本地 SQLite（`kaoyan-db`）；云端多端同步见 [DEPLOY.md](./DEPLOY.md)「可选：启用 D1」 |
 

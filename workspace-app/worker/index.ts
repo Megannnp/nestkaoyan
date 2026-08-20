@@ -10,6 +10,8 @@ import { handleWorkspace } from "./workspace";
 interface Env {
   ASSETS: Fetcher;
   DB?: D1Database;
+  /** 本地 SQLite 同步服务地址（Docker 部署：http://kaoyan-db:3001；也可经 process.env 注入） */
+  WORKSPACE_DB_URL?: string;
   /** DeepSeek 真题分析密钥（服务端 secret / 本地 .dev.vars；绝不下发前端） */
   DEEPSEEK_API_KEY?: string;
   IMAGES: {

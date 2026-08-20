@@ -4,16 +4,44 @@
 #   docker compose logs -f        # 看日志
 #   docker compose down           # 停止
 #
-# 数据：业务数据在浏览器 localStorage（无需持久卷）；
-# 真题 PDF 放 ./papers/（与 public/papers 同名结构，启动即自动挂载）。
+# 数据：
+#   - 工作区数据：本地 SQLite（kaoyan-db 服务，数据卷 kaoyan-data）→ 换浏览器/清缓存不丢
+#   - 浏览器 localStorage 仍作为首选缓存（离线可用），服务端 SQLite 为权威备份
+#   - 真题 PDF 放 ./papers/（与 public/papers 同名结构，启动即自动挂载）
 services:
+  kaoyan-db:
+    build: ./database
+    image: kaoyan-db:latest
+    container_name: kaoyan-db
+    restart: unless-stopped
+    environment:
+      - DB_PATH=/app/data/kaoyan.db
+    volumes:
+      # SQLite 数据文件持久化（备份 = 拷贝 kaoyan-data 卷或直接复制 .db 文件）
+      - kaoyan-data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   kaoyan-exam-workspace:
     build: .
     image: kaoyan-exam-workspace:latest
     container_name: kaoyan-exam-workspace
     restart: unless-stopped
+    depends_on:
+      kaoyan-db:
+        condition: service_healthy
     ports:
       - "3000:3000"
+    environment:
+      # worker 通过 process.env 读取（nodejs_compat）；也可改为 wrangler [vars] 绑定
+      - WORKSPACE_DB_URL=http://kaoyan-db:3001
     volumes:
       # 真题 PDF（版权材料不入镜像）：./papers/politics-YYYY.pdf 等 → 应用阅读器直接可用
       - ./papers:/app/public/papers
+
+volumes:
+  kaoyan-data:
+

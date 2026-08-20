@@ -138,9 +138,11 @@ workspace-app/
 
 ## 数据说明
 
-- 默认数据保存在**浏览器 localStorage**（key: `nest-exam-workspace-v5`），无需数据库即可运行（双击脚本 / 快速体验）
-- **Docker 模式自动启用本地 SQLite**（`kaoyan-db` 服务）：保存时镜像到服务端，换浏览器/清缓存/换设备（同一局域网）数据自动恢复，备份 = 拷贝 SQLite 文件
-- 需要**多端同步 / 后台统一管理**时：启用 Cloudflare D1（见 `.env.example` 与 DEPLOY.md「可选：启用 D1」）
+- 默认数据保存在**浏览器 localStorage**（key: `nest-exam-workspace-v5`）+ **本地 SQLite**（`data/kaoyan.db`）双写：
+  - 浏览器缓存负责秒开与离线；服务端 SQLite 为权威持久化
+  - **换浏览器、清缓存、换设备（同一局域网）数据自动恢复**（含 PDF/DOCX/文本文件二进制）
+- 三种安装方式（Docker / 双击脚本 / 开发者手动）都自动启用本地 SQLite；备份 = 拷贝 `data/kaoyan.db`
+- 需要**云端多端同步 / 后台统一管理**时：启用 Cloudflare D1（见 `.env.example` 与 DEPLOY.md「可选：启用 D1」）
 - 用户可随时在「设置 → 数据管理」导出/导入完整学习档案（JSON 备份）
 
 ## License

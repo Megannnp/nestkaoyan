@@ -16,6 +16,7 @@ import {
 } from "./lib/default-data";
 import { TOAST_DURATION } from "./lib/rules";
 import { hydrateWorkspace, saveWorkspace, buildWorkspaceSnapshot, fetchServerWorkspace } from "./lib/storage";
+import { restoreMissingFilesFromServer } from "./lib/pdf-storage";
 import { loadLearningEvents, type LearningEvent } from "./lib/events";
 import { computeReplayComparison, computeProgressComparison } from "./lib/replay-console";
 import { projectKnowledgeState } from "./lib/projection";
@@ -503,6 +504,10 @@ export default function Home() {
       if (data.activeKnowledgeSubject) setActiveKnowledgeSubject(data.activeKnowledgeSubject);
       if (data.activeCardSubject) setActiveCardSubject(data.activeCardSubject);
       if (data.resources) setResources(data.resources);
+      // SQLite/D1 同步模式：拉回缺失的 PDF/文本二进制（换浏览器/清缓存后自动恢复）
+      if (data.resources?.length) {
+        void restoreMissingFilesFromServer(data.resources);
+      }
       if (data.materials && Array.isArray(data.materials)) {
         setMaterials(data.materials);
       } else if (data.resources?.length) {

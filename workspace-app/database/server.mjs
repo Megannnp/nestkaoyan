@@ -11,12 +11,18 @@
  *   GET /workspace   → { ok:true, snapshot:{...} | null, storageVersion?, updatedAt? }
  *   PUT /workspace   → body = 完整工作区快照 JSON → { ok:true }
  *   GET /health      → { ok:true }
+ *   文件（PDF/DOCX/文本，与工作区 JSON 分离存磁盘）：
+ *   PUT /files/:key    body = 二进制 → 落盘 <dataDir>/files/（key 经 base64url 安全转码）
+ *   GET /files/:key    → 二进制流（无 meta，mime 由客户端资源记录提供）
+ *   HEAD /files/:key   → 200/404（存在性检查）
+ *   DELETE /files/:key → 删除（幂等）
  *
  * 数据表：workspace_snapshots（单行，id='default'），与 Cloudflare D1 表结构一致。
  *
  * 环境变量：
- *   PORT   监听端口（默认 3001）
- *   DB_PATH SQLite 文件路径（默认 ./data/kaoyan.db）
+ *   PORT           监听端口（默认 3001）
+ *   DB_PATH        SQLite 文件路径（默认 ./data/kaoyan.db）
+ *   MAX_FILE_BYTES 单文件上限（默认 200MB）
  */
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
@@ -68,6 +74,77 @@ export async function startWorkspaceDbServer({
     )
   `);
 
+  // ── 文件存储（PDF/DOCX/文本二进制，独立于 SQLite）────────────────
+  const filesDir = path.join(path.dirname(dbPath), "files");
+  fs.mkdirSync(filesDir, { recursive: true });
+  const MAX_FILE_BYTES = Number(process.env.MAX_FILE_BYTES || 200 * 1024 * 1024);
+
+  /** 校验并映射文件 key → 磁盘安全文件名（base64url 转码，防路径穿越） */
+  function filePathFor(key) {
+    if (!/^[A-Za-z0-9._:-]+$/.test(key)) return null;
+    return path.join(filesDir, Buffer.from(key, "utf8").toString("base64url"));
+  }
+
+  async function handleFileRequest(req, res, key) {
+    if (req.method === "PUT") {
+      const filePath = filePathFor(key);
+      if (!filePath) return json(res, 400, { ok: false, error: "bad_key" });
+      const contentLength = Number(req.headers["content-length"] || 0);
+      if (contentLength > MAX_FILE_BYTES) return json(res, 413, { ok: false, error: "too_large" });
+      // 流式写入；对无 content-length（chunked）的请求也按字节计数强制上限
+      const out = fs.createWriteStream(filePath);
+      const tooLarge = await new Promise((resolve) => {
+        let written = 0;
+        let flag = false;
+        req.on("data", (chunk) => {
+          written += chunk.length;
+          if (written > MAX_FILE_BYTES && !flag) {
+            flag = true;
+            out.destroy();
+            req.destroy();
+          }
+        });
+        req.pipe(out);
+        out.on("finish", () => resolve(flag));
+        out.on("error", () => resolve(flag));
+        req.on("error", () => resolve(flag));
+      });
+      if (tooLarge) {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        return json(res, 413, { ok: false, error: "too_large" });
+      }
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === "GET" || req.method === "HEAD") {
+      const filePath = filePathFor(key);
+      if (!filePath || !fs.existsSync(filePath)) {
+        if (req.method === "HEAD") {
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+        return json(res, 404, { ok: false, error: "not_found" });
+      }
+      const stat = fs.statSync(filePath);
+      res.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-length": stat.size,
+      });
+      if (req.method === "HEAD") {
+        res.end();
+        return;
+      }
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    }
+    if (req.method === "DELETE") {
+      const filePath = filePathFor(key);
+      if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      return json(res, 200, { ok: true });
+    }
+    return json(res, 405, { ok: false, error: "method_not_allowed" });
+  }
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
@@ -117,6 +194,11 @@ export async function startWorkspaceDbServer({
         }
 
         return json(res, 405, { ok: false, error: "method_not_allowed" });
+      }
+
+      if (url.pathname.startsWith("/files/")) {
+        const key = decodeURIComponent(url.pathname.slice("/files/".length));
+        return handleFileRequest(req, res, key);
       }
 
       return json(res, 404, { ok: false, error: "not_found" });

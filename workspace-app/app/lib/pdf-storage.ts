@@ -45,6 +45,93 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+/** 写入单条文件记录（savePdfFile / saveDocText / 服务端恢复共用） */
+async function putBlobRecord(record: StoredPdfFile): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(PDF_STORE_NAME, "readwrite");
+    tx.objectStore(PDF_STORE_NAME).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB 写入失败"));
+  });
+}
+
+/** ── 服务端文件镜像/恢复（SQLite sidecar 模式；无后端时全部静默）── */
+
+async function mirrorFileToServer(fileStorageKey: string, blob: Blob): Promise<void> {
+  try {
+    await fetch(`/api/files/${encodeURIComponent(fileStorageKey)}`, {
+      method: "PUT",
+      headers: { "content-type": blob.type || "application/octet-stream" },
+      body: blob,
+    });
+  } catch {
+    /* 无后端/离线：保持浏览器本地模式 */
+  }
+}
+
+async function deleteFileFromServer(fileStorageKey: string): Promise<void> {
+  try {
+    await fetch(`/api/files/${encodeURIComponent(fileStorageKey)}`, { method: "DELETE" });
+  } catch {
+    /* 静默 */
+  }
+}
+
+async function fetchFileFromServer(fileStorageKey: string): Promise<Blob | null> {
+  try {
+    const res = await fetch(`/api/files/${encodeURIComponent(fileStorageKey)}`);
+    if (!res.ok) return null;
+    return await res.blob();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 恢复缺失的文件二进制（换浏览器/清缓存后从服务端拉回 PDF/DOCX/文本）。
+ * 幂等：已在 IndexedDB 的记录跳过；无后端时静默跳过。
+ */
+export async function restoreMissingFilesFromServer(
+  resources: ReadonlyArray<{ fileStorageKey?: string }>,
+): Promise<void> {
+  for (const resource of resources) {
+    const key = resource.fileStorageKey;
+    if (!key) continue;
+    const textKey = `${key}${DOCX_TEXT_KEY_SUFFIX}`;
+
+    const existing = await loadPdfBlob(key).catch(() => null);
+    if (!existing) {
+      const blob = await fetchFileFromServer(key);
+      if (blob) {
+        await putBlobRecord({
+          fileStorageKey: key,
+          blob,
+          name: key,
+          mimeType: blob.type || "application/octet-stream",
+          size: blob.size,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    const existingText = await loadPdfBlob(textKey).catch(() => null);
+    if (!existingText) {
+      const textBlob = await fetchFileFromServer(textKey);
+      if (textBlob) {
+        await putBlobRecord({
+          fileStorageKey: textKey,
+          blob: textBlob,
+          name: textKey,
+          mimeType: "text/plain",
+          size: textBlob.size,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+  }
+}
+
 /** 保存 PDF 文件到 IndexedDB */
 export async function savePdfFile(file: File): Promise<{ fileStorageKey: string; size: number; mimeType: string }> {
   const fileStorageKey = `pdf-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -57,13 +144,9 @@ export async function savePdfFile(file: File): Promise<{ fileStorageKey: string;
     size: file.size,
     createdAt: new Date().toISOString(),
   };
-  const db = await openDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(PDF_STORE_NAME, "readwrite");
-    tx.objectStore(PDF_STORE_NAME).put(record);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error("PDF 保存失败"));
-  });
+  await putBlobRecord(record);
+  // 服务端镜像（SQLite sidecar 模式；无后端时静默失败）
+  void mirrorFileToServer(fileStorageKey, blob);
   return { fileStorageKey, size: file.size, mimeType: file.type || "application/pdf" };
 }
 
@@ -84,14 +167,17 @@ export async function loadPdfBlob(fileStorageKey: string): Promise<Blob | null> 
 /** 保存文档解析文本（docx 等）到 IndexedDB（key = fileStorageKey + ":text"） */
 export async function saveDocText(fileStorageKey: string, text: string): Promise<boolean> {
   if (!text) return false;
-  const db = await openDb();
   const textKey = `${fileStorageKey}${DOCX_TEXT_KEY_SUFFIX}`;
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(PDF_STORE_NAME, "readwrite");
-    tx.objectStore(PDF_STORE_NAME).put({ fileStorageKey: textKey, blob: new Blob([text], { type: "text/plain" }), name: textKey, mimeType: "text/plain", size: text.length, createdAt: new Date().toISOString() });
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error("文本保存失败"));
+  const blob = new Blob([text], { type: "text/plain" });
+  await putBlobRecord({
+    fileStorageKey: textKey,
+    blob,
+    name: textKey,
+    mimeType: "text/plain",
+    size: text.length,
+    createdAt: new Date().toISOString(),
   });
+  void mirrorFileToServer(textKey, blob);
   return true;
 }
 
@@ -123,4 +209,7 @@ export async function deletePdfFile(fileStorageKey: string): Promise<void> {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("PDF 删除失败"));
   });
+  // 同步清理服务端文件（SQLite sidecar 模式；无后端时静默失败）
+  void deleteFileFromServer(fileStorageKey);
+  void deleteFileFromServer(textKey);
 }

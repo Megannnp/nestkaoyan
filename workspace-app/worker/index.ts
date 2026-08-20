@@ -6,6 +6,7 @@ import { handleAnalyzeMistakes } from "./analyze-mistakes";
 import { handlePlanGenerate } from "./plan-generate";
 import { handleChatComplete } from "./chat-complete";
 import { handleWorkspace } from "./workspace";
+import { handleFiles } from "./files";
 
 interface Env {
   ASSETS: Fetcher;
@@ -57,6 +58,10 @@ const worker = {
 
     if (url.pathname === "/api/workspace") {
       return handleWorkspace(request, env);
+    }
+
+    if (url.pathname.startsWith("/api/files/")) {
+      return handleFiles(request, env);
     }
 
     if (url.pathname === "/_vinext/image") {

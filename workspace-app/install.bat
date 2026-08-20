@@ -2,8 +2,8 @@
 REM ═══════════════════════════════════════════════════
 REM  筑巢考研工作台 一键安装（Windows）
 REM  用法：双击这个文件运行
-REM  自动完成：检查 Node → 装依赖 → 构建 → 启动 → 打开浏览器
-REM  数据默认存在浏览器 localStorage，备份/迁移见「设置 → 数据管理」
+REM  自动完成：检查 Node → 装依赖 → 构建 → 启动本地 SQLite → 启动应用 → 打开浏览器
+REM  数据：默认存本地 SQLite（data\kaoyan.db）+ 浏览器缓存，换浏览器/清缓存不丢
 REM ═══════════════════════════════════════════════════
 chcp 65001 >nul
 setlocal enabledelayedexpansion
@@ -46,21 +46,32 @@ if not exist dist (
   )
 )
 
-REM ── 3. 启动 ─────────────────────────────────────
+REM ── 3. 启动本地 SQLite 数据库（kaoyan-db，零依赖）─────
+netstat -an | findstr ":3001 " | findstr "LISTENING" >nul
+if %errorlevel%==0 (
+  echo   ✅ 本地数据库已在运行（端口 3001）
+) else (
+  echo   ⏳ 启动本地 SQLite 数据库（kaoyan-db）…
+  start "kaoyan-db" /B cmd /c "node database\server.mjs > kaoyan-db.log 2>&1"
+  timeout /t 1 /nobreak >nul
+)
+
+REM ── 4. 启动 ─────────────────────────────────────
 if not defined PORT set PORT=3000
 echo   ⏳ 启动中（端口 %PORT%）…
+set "WORKSPACE_DB_URL=http://127.0.0.1:3001"
 start "kaoyan-exam-workspace" cmd /c "npm run start > kaoyan.log 2>&1"
 timeout /t 5 /nobreak >nul
 
-REM ── 4. 打开浏览器 ─────────────────────────────
+REM ── 5. 打开浏览器 ─────────────────────────────
 start "" "http://localhost:%PORT%"
 
 echo.
 echo   🎉 安装完成！
 echo   ──────────────────────────────────────────────
 echo   💻 本机使用：   http://localhost:%PORT%
+echo   💾 数据持久化： 本地 SQLite（data\kaoyan.db）+ 浏览器缓存，换浏览器不丢
 echo   📂 真题 PDF：   放到 public\papers\（命名规范见 public\papers\README.md）
-echo   💾 数据备份：   设置 → 数据管理 → 导出学习档案
-echo   📜 运行日志：   type kaoyan.log
+echo   📜 运行日志：   type kaoyan.log（数据库：type kaoyan-db.log）
 echo.
 pause

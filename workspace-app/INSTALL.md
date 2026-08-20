@@ -72,10 +72,12 @@ docker compose up -d
 | macOS | `install.command`（首次若提示"无法打开"，右键→打开） |
 | Windows | `install.bat` |
 
-脚本自动完成：检查 Node → 装依赖 → 构建 → 启动 → 打开浏览器。
+脚本自动完成：检查 Node → 装依赖 → 构建 → **启动本地 SQLite** → 启动 → 打开浏览器。
 
 > ✅ 看到「🎉 安装完成！」并自动打开 http://localhost:3000。
 > ❌ 窗口一闪而过？右键脚本→用终端/命令提示符打开，看报错。
+> 💡 **数据持久化**：脚本会同时启动本地 SQLite（`data/kaoyan.db`），换浏览器/清缓存数据不丢；
+> 备份 = 拷贝 `data/kaoyan.db`（或「设置 → 数据管理 → 导出」）。
 
 ### B3. 常用命令（手动重启）
 
@@ -155,6 +157,6 @@ npm run deploy
 | 端口被占用 | 换端口：`PORT=3100 npm run start`（路 B）或改 docker-compose.yml 的 `3000:3000` 为 `3100:3000` |
 | 手机打不开电脑的 localhost | 手机连同一 WiFi，访问 `http://电脑IP:3000`（macOS 终端 `ipconfig getifaddr en0` 查 IP） |
 | AI 提示"演示回复" | 在「设置 → AI 学习助手」填入你的 DeepSeek key（key 只存本机） |
-| 数据会丢吗 | 路 A（Docker）数据存本地 SQLite，换浏览器/清缓存不丢；路 B/C 数据在浏览器 localStorage，换设备/清缓存前先「设置 → 数据管理 → 导出学习档案」备份 |
-| 想用数据库 / 多端同步 | Docker 模式已内置本地 SQLite（`kaoyan-db`）；云端多端同步见 [DEPLOY.md](./DEPLOY.md)「可选：启用 D1」 |
+| 数据会丢吗 | 三种安装方式都自动启用本地 SQLite（`data/kaoyan.db`），换浏览器/清缓存不丢；备份 = 拷贝该文件或「设置 → 数据管理 → 导出」 |
+| 想用数据库 / 多端同步 | 已内置本地 SQLite（所有安装方式）；云端多端同步见 [DEPLOY.md](./DEPLOY.md)「可选：启用 D1」 |
 

@@ -1,32 +1,46 @@
 # 数据库交付说明（database/）
 
-> 数据策略：**默认零数据库运行**（浏览器 localStorage）；需要数据不跟浏览器走时，
-> 可启用**本地 SQLite 同步服务**（Docker/局域网）或 **Cloudflare D1**（云端）。
-> 所有业务数据以 JSON 快照存于单张表，schema 极简、易迁移、易备份。
+> 数据策略：**浏览器 localStorage + 本地 SQLite 双写**（换浏览器/清缓存不丢）；
+> 云端部署时可选 **Cloudflare D1**。工作区以 JSON 快照存于单张表，文件二进制独立落盘，
+> schema 极简、易迁移、易备份。
 
 ---
 
-## 一、默认数据存储（当前生产形态）
+## 一、默认数据存储（双写：浏览器缓存 + 本地 SQLite）
 
-- 位置：**浏览器 localStorage**（key: `nest-exam-workspace-v5`）
-- 无需数据库、无需运维，单机可用
+- 浏览器 **localStorage**（key: `nest-exam-workspace-v5`）：秒开 + 离线
+- 本地 **SQLite**（`data/kaoyan.db`，由 `database/server.mjs` 提供）：权威持久化
+- **文件二进制**（PDF/DOCX/文本/图片）存 IndexedDB + 镜像到服务端 `data/files/`
 - 读写唯一入口：`app/lib/storage.ts`（`hydrateWorkspace` / `saveWorkspace`）
-- 备份：用户「设置 → 数据管理 → 导出」下载完整 JSON；导入可恢复
+- 备份：拷贝 `data/kaoyan.db` + `data/files/`，或「设置 → 数据管理 → 导出」JSON
 
-**局限**（需要时才升级下面两种方案）：
-- 数据绑定浏览器，换设备/清缓存需手动导出导入
-- 无法多端同步、无法后台统一管控
+**效果**：换浏览器、清缓存、换设备（同一局域网）数据自动恢复，无需手动导出导入。
 
 ---
 
-## 二、本地 SQLite 同步服务（database/server.mjs，Docker/局域网，可选）
+## 二、本地 SQLite 同步服务（database/server.mjs，零依赖）
 
 零依赖的轻量 HTTP 服务（基于 Node 内置 `node:sqlite`，Node ≥ 22.5），
-为打包安装（`docker compose`）提供**服务端 SQLite 持久化**：
+为打包安装（Docker / 双击脚本 / 手动）提供**服务端 SQLite 持久化**：
 
 - 浏览器保存时自动 `PUT /api/workspace` → worker 代理到本服务 → 写入 SQLite 文件
 - 新浏览器 / 换设备（同一局域网）首次打开自动 `GET /api/workspace` → 从服务端恢复
-- 备份 = 直接拷贝 SQLite 文件（默认 `data/kaoyan.db`，docker volume `kaoyan-data`）
+- **PDF/DOCX/文本文件**上传时镜像 `PUT /api/files/:key`，恢复时自动拉回
+- 备份 = 拷贝 SQLite 文件 + `files/` 目录（默认 `data/`，docker volume `kaoyan-data`）
+
+### 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/health` | 健康检查 `{ ok: true }` |
+| GET | `/workspace` | 返回最近快照 `{ ok, snapshot, storageVersion, updatedAt }` |
+| PUT | `/workspace` | 覆盖保存完整工作区快照 `{ ok }` |
+| PUT | `/files/:key` | 上传文件二进制（落盘 `data/files/`，key 经 base64url 安全转码） |
+| GET | `/files/:key` | 下载文件二进制流 |
+| HEAD | `/files/:key` | 文件存在性检查（200/404） |
+| DELETE | `/files/:key` | 删除文件（幂等） |
+
+> key 仅允许 `[A-Za-z0-9._:-]`，防路径穿越；单文件上限 `MAX_FILE_BYTES`（默认 200MB）。
 
 ### 表结构（与 D1 一致，`db/schema.ts` 已定义）
 
@@ -40,8 +54,8 @@
 ### worker 后端选择顺序
 
 1. `env.DB`（Cloudflare D1，云端部署）
-2. `env.WORKSPACE_DB_URL` / `process.env.WORKSPACE_DB_URL`（本地 SQLite，Docker）
-3. 都没有 → 纯 localStorage 模式（双击脚本 / 快速体验）
+2. `env.WORKSPACE_DB_URL` / `process.env.WORKSPACE_DB_URL`（本地 SQLite，Docker/双击/手动）
+3. 都没有 → 纯浏览器本地模式（无 sidecar 时兜底，仅存 localStorage/IndexedDB）
 
 ### 运行（Docker 已由 docker-compose 编排）
 
@@ -84,8 +98,8 @@ npm run build && npx wrangler deploy
 
 | 场景 | 操作 |
 |------|------|
-| 单机备份 | 设置 → 数据管理 → 导出 JSON（建议每次大版本更新后导出一次） |
-| 换设备迁移 | 旧设备导出 → 新设备同一浏览器打开 → 导入；或启用 SQLite/D1 后自动同步 |
+| 单机备份 | 拷贝 `data/kaoyan.db` + `data/files/`（或「设置 → 数据管理 → 导出」JSON） |
+| 换设备迁移 | 拷贝上述数据目录；同一局域网则打开即自动同步 |
 | 本地 SQLite 备份 | 直接拷贝 `data/kaoyan.db`（或 docker volume 快照） |
 | D1 备份 | `npx wrangler d1 export kaoyan-workspace --remote --output=backup.sql` |
 | D1 恢复 | `npx wrangler d1 execute kaoyan-workspace --remote --file=backup.sql` |

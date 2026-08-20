@@ -21,6 +21,7 @@
  *
  * 环境变量：
  *   PORT           监听端口（默认 3001）
+ *   HOST           监听地址（默认 127.0.0.1 仅本机；Docker 内部网络需设为 0.0.0.0）
  *   DB_PATH        SQLite 文件路径（默认 ./data/kaoyan.db）
  *   MAX_FILE_BYTES 单文件上限（默认 200MB）
  */
@@ -61,7 +62,8 @@ function readBody(req) {
 export async function startWorkspaceDbServer({
   port = Number(process.env.PORT || 3001),
   dbPath = defaultDbPath(),
-  host = "0.0.0.0",
+  // 默认仅本机：局域网访问一律经应用层（worker）代理并做密码认证，避免数据接口直接暴露
+  host = process.env.HOST || "127.0.0.1",
 } = {}) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);

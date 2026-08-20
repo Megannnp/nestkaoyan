@@ -36,6 +36,7 @@ import { DashboardTasksView } from "./components/DashboardTasksView";
 import { GlobalResourceUploadModal } from "./components/GlobalResourceUploadModal";
 import { AgentView } from "./components/AgentView";
 import { SettingsView } from "./components/SettingsView";
+import LoginOverlay from "./components/LoginOverlay";
 import { TaskCompletionModal } from "./components/TaskCompletionModal";
 import { buildHeatmapDays, formatHeatmapStart, monBasedOffsetOf, buildHeatmapGrid, buildHeatmapDayLabels, countCardsByDate } from "./lib/heatmap";
 import { today, dateOnly, normalizeExamGoal } from "./lib/utils";
@@ -63,6 +64,8 @@ export default function Home() {
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const [bootChecked, setBootChecked] = useState(false);
   const [appReady, setAppReady] = useState(false);
+  // 私有部署访问密码门（KAOYAN_AUTH=1 且未授权时显示登录遮罩）
+  const [authGate, setAuthGate] = useState<{ required: boolean; ok: boolean }>({ required: false, ok: true });
   // ─── Dashboard: Hydration-safe date (SSR: fixed; mount: real) ───
   // 必须在派生值（dueCards 等）之前声明，否则 TDZ ReferenceError
   const [hydratedTodayStr, setHydratedTodayStr] = useState("");
@@ -461,6 +464,24 @@ export default function Home() {
   
   });
 
+  // 访问密码门：检查 /api/auth/status；未授权（非本机 + 无 session）时显示登录遮罩
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/status")
+      .then((r) => r.json())
+      .then((body) => {
+        if (cancelled) return;
+        const enabled = body?.authEnabled === true;
+        setAuthGate({ required: enabled, ok: enabled ? body?.authorized === true : true });
+      })
+      .catch(() => {
+        if (!cancelled) setAuthGate({ required: false, ok: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ─── Storage Contract 1C-1: 唯一 hydrate 入口（v5 优先；v3/v4 自动迁移，可回滚）───
   // 置于 useWorkspaceHandlers 之后：内部使用 runTimerFrom（若在 handlers 声明前调用会 TDZ）
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -646,6 +667,9 @@ export default function Home() {
   return (
     <WorkspaceProvider value={workspaceCtx}>
     <main>
+      {authGate.required && !authGate.ok && (
+        <LoginOverlay onSuccess={() => window.location.reload()} />
+      )}
       {!appReady && (
         <div
           aria-label="应用初始化中"

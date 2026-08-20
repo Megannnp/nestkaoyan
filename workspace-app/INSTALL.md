@@ -78,6 +78,8 @@ docker compose up -d
 > ❌ 窗口一闪而过？右键脚本→用终端/命令提示符打开，看报错。
 > 💡 **数据持久化**：脚本会同时启动本地 SQLite（`data/kaoyan.db`），换浏览器/清缓存数据不丢；
 > 备份 = 拷贝 `data/kaoyan.db`（或「设置 → 数据管理 → 导出」）。
+> 🔑 **访问密码**：首次安装自动生成（保存在 `data/password.txt`），**本机打开免登录**，
+> 其他设备（手机/局域网）访问需输入该密码。
 
 ### B3. 常用命令（手动重启）
 
@@ -155,7 +157,9 @@ npm run deploy
 | 问题 | 解决 |
 |---|---|
 | 端口被占用 | 换端口：`PORT=3100 npm run start`（路 B）或改 docker-compose.yml 的 `3000:3000` 为 `3100:3000` |
-| 手机打不开电脑的 localhost | 手机连同一 WiFi，访问 `http://电脑IP:3000`（macOS 终端 `ipconfig getifaddr en0` 查 IP） |
+| 手机打不开电脑的 localhost | 手机连同一 WiFi，访问 `http://电脑IP:3000`；需输入访问密码（首次安装自动生成，见 `data/password.txt`） |
+| 其他设备访问要密码吗 | 默认启用访问密码：**本机（localhost）免登录**，局域网/其他设备需输入密码；密码在 `data/password.txt`（Docker 在 `/app/data/password.txt`，容器日志也会打印） |
+| 忘记访问密码 | 打开 `data/password.txt` 查看；或删除该文件后重启（会重新生成） |
 | AI 提示"演示回复" | 在「设置 → AI 学习助手」填入你的 DeepSeek key（key 只存本机） |
 | 数据会丢吗 | 三种安装方式都自动启用本地 SQLite（`data/kaoyan.db`），换浏览器/清缓存不丢；备份 = 拷贝该文件或「设置 → 数据管理 → 导出」 |
 | 想用数据库 / 多端同步 | 已内置本地 SQLite（所有安装方式）；云端多端同步见 [DEPLOY.md](./DEPLOY.md)「可选：启用 D1」 |

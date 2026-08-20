@@ -16,8 +16,10 @@ services:
     restart: unless-stopped
     environment:
       - DB_PATH=/app/data/kaoyan.db
+      # 容器内部网络需要监听 0.0.0.0（默认 127.0.0.1 仅本机，防止直连暴露）
+      - HOST=0.0.0.0
     volumes:
-      # SQLite 数据文件持久化（备份 = 拷贝 kaoyan-data 卷或直接复制 .db 文件）
+      # SQLite 数据文件 + 文件二进制持久化（备份 = 拷贝 kaoyan-data 卷或直接复制 .db）
       - kaoyan-data:/app/data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -38,9 +40,12 @@ services:
     environment:
       # worker 通过 process.env 读取（nodejs_compat）；也可改为 wrangler [vars] 绑定
       - WORKSPACE_DB_URL=http://kaoyan-db:3001
+      # 访问密码由 entrypoint.sh 自动生成（写入 /app/data/password.txt）
     volumes:
       # 真题 PDF（版权材料不入镜像）：./papers/politics-YYYY.pdf 等 → 应用阅读器直接可用
       - ./papers:/app/public/papers
+      # 与 kaoyan-db 共享数据卷：password.txt 持久化（默认启用访问密码，本机免登录、局域网需密码）
+      - kaoyan-data:/app/data
 
 volumes:
   kaoyan-data:

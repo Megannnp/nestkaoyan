@@ -47,12 +47,21 @@ else
   sleep 1
 fi
 
+# ── 3.5 生成访问密码（首次；本机免登录，其他设备访问需密码）──
+mkdir -p data
+if [ ! -f data/password.txt ]; then
+  PASSWORD=$(openssl rand -hex 8 2>/dev/null || echo "kaoyan$(date +%s | tail -c 7)")
+  echo "$PASSWORD" > data/password.txt
+  chmod 600 data/password.txt
+  echo "  🔑 已生成访问密码：$PASSWORD（保存在 data/password.txt）"
+fi
+
 # ── 4. 启动应用 ─────────────────────────────────────
 PORT=${PORT:-3000}
 if lsof -ti :$PORT >/dev/null 2>&1; then
   echo "  ℹ️  端口 $PORT 已在运行（可能之前启动过），跳过启动。"
 else
-  nohup env WORKSPACE_DB_URL=http://127.0.0.1:3001 npm run start > kaoyan.log 2>&1 &
+  nohup env KAOYAN_AUTH=1 KAOYAN_PASSWORD="$(cat data/password.txt)" WORKSPACE_DB_URL=http://127.0.0.1:3001 npm run start > kaoyan.log 2>&1 &
   echo "  ⏳ 启动中…"
   sleep 3
 fi
@@ -65,6 +74,7 @@ echo "  🎉 安装完成！"
 echo "  ──────────────────────────────────────────────"
 echo "  💻 本机使用：   http://localhost:$PORT"
 echo "  📱 手机访问：   http://$IP:$PORT（手机连同一 WiFi）"
+echo "  🔑 访问密码：   $(cat data/password.txt 2>/dev/null || echo '见 data/password.txt')（本机免登录，其他设备访问需输入）"
 echo "  💾 数据持久化： 本地 SQLite（data/kaoyan.db）+ 浏览器缓存，换浏览器不丢"
 echo "  📂 真题 PDF：   放到 public/papers/（命名规范见 public/papers/README.md）"
 echo "  📜 运行日志：   tail -f kaoyan.log（数据库：tail -f kaoyan-db.log）"

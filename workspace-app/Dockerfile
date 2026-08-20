@@ -32,7 +32,11 @@ COPY --from=builder /app/next.config.ts ./next.config.ts
 COPY --from=builder /app/vite.config.ts ./vite.config.ts
 COPY --from=builder /app/postcss.config.mjs ./postcss.config.mjs
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
+# 访问密码自动生成入口（KAOYAN_AUTH=1 默认启用；数据卷 /app/data 持久化密码）
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x entrypoint.sh
 EXPOSE 3000
 # PORT 环境变量由 vinext start 读取（默认 3000）；.wrangler 日志目录需可写
 RUN mkdir -p .wrangler
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["npm", "run", "start"]

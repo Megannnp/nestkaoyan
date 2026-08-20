@@ -56,9 +56,24 @@ if %errorlevel%==0 (
   timeout /t 1 /nobreak >nul
 )
 
+REM ── 3.5 生成访问密码（首次；本机免登录，其他设备访问需密码）──
+if not exist data mkdir data
+set "KAOYAN_PASSWORD="
+if exist data\password.txt (
+  set /p KAOYAN_PASSWORD=<data\password.txt
+)
+if not defined KAOYAN_PASSWORD (
+  set "KAOYAN_PASSWORD="
+  for /f %%p in ('powershell -NoProfile -Command "[guid]::NewGuid().ToString('N').Substring(0,12)"') do set "KAOYAN_PASSWORD=%%p"
+  if not defined KAOYAN_PASSWORD set "KAOYAN_PASSWORD=kaoyan%RANDOM%%RANDOM%"
+  echo !KAOYAN_PASSWORD!> data\password.txt
+  echo   🔑 已生成访问密码：!KAOYAN_PASSWORD!（保存在 data\password.txt）
+)
+
 REM ── 4. 启动 ─────────────────────────────────────
 if not defined PORT set PORT=3000
 echo   ⏳ 启动中（端口 %PORT%）…
+set "KAOYAN_AUTH=1"
 set "WORKSPACE_DB_URL=http://127.0.0.1:3001"
 start "kaoyan-exam-workspace" cmd /c "npm run start > kaoyan.log 2>&1"
 timeout /t 5 /nobreak >nul
@@ -66,10 +81,14 @@ timeout /t 5 /nobreak >nul
 REM ── 5. 打开浏览器 ─────────────────────────────
 start "" "http://localhost:%PORT%"
 
+set "PWSHOW="
+if exist data\password.txt set /p PWSHOW=<data\password.txt
 echo.
 echo   🎉 安装完成！
 echo   ──────────────────────────────────────────────
 echo   💻 本机使用：   http://localhost:%PORT%
+echo   📱 手机访问：   http://电脑IP:%PORT%（手机连同一 WiFi）
+echo   🔑 访问密码：   %PWSHOW%（本机免登录，其他设备访问需输入）
 echo   💾 数据持久化： 本地 SQLite（data\kaoyan.db）+ 浏览器缓存，换浏览器不丢
 echo   📂 真题 PDF：   放到 public\papers\（命名规范见 public\papers\README.md）
 echo   📜 运行日志：   type kaoyan.log（数据库：type kaoyan-db.log）

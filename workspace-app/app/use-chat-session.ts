@@ -5,6 +5,7 @@
  * 从 use-workspace-handlers.ts 抽出聊天会话域，降低上帝模块体积。
  * 导出名与行为与内联版本完全等价，调用方无需改动语义。
  */
+import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { AgentMessage, ChatSession } from "./lib/types";
 import { createChatSession, createMessage, appendMessage } from "./lib/chat";
@@ -20,6 +21,16 @@ export interface UseChatSessionDeps {
 
 export function useChatSession(deps: UseChatSessionDeps) {
   const { activeSessionIdRef, setChatSessions, setActiveSessionId, setChatHistoryOpen, setNotice } = deps;
+
+  // 打字机动画 interval 引用：新动画启动前清掉旧动画，组件卸载时清掉活动的，防止泄漏
+  const typeTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+
+  useEffect(() => {
+    return () => {
+      if (typeTimerRef.current) clearInterval(typeTimerRef.current);
+      typeTimerRef.current = undefined;
+    };
+  }, []);
 
   function ensureChatSession() {
     let sessionId = activeSessionIdRef.current;
@@ -45,15 +56,20 @@ export function useChatSession(deps: UseChatSessionDeps) {
     const sessionId = ensureChatSession();
     const message = createMessage("assistant", "", messageType);
     setChatSessions((items) => appendMessage(items, sessionId, message));
+    // 空文本直接落一条空消息，不启动动画
+    if (!text) return;
     const step = text.length > 300 ? 4 : 2;
     let idx = 0;
-    const timer = setInterval(() => {
+    // 新动画开始前清掉上一个未结束的动画，避免并发 interval 累积
+    if (typeTimerRef.current) clearInterval(typeTimerRef.current);
+    typeTimerRef.current = setInterval(() => {
       idx += step;
       setChatSessions((items) => items.map((s) => s.id === sessionId
         ? { ...s, messages: s.messages.map((m) => m.id === message.id ? { ...m, content: text.slice(0, idx), updatedAt: new Date().toISOString() } : m) }
         : s));
       if (idx >= text.length) {
-        clearInterval(timer);
+        if (typeTimerRef.current) clearInterval(typeTimerRef.current);
+        typeTimerRef.current = undefined;
         setNotice(text);
       }
     }, 20);

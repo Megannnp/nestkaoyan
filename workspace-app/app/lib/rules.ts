@@ -134,3 +134,5 @@ export const TOOLTIP = {
 export const CHAT_MAX_MESSAGES_PER_SESSION = 80;
 /** 最多保留的会话数（超出裁剪最旧） */
 export const CHAT_MAX_SESSIONS = 30;
+/** 计划/执行日志最多保留条数（超出裁剪最旧，防工作区 JSON 膨胀） */
+export const MAX_PLAN_LOGS = 500;

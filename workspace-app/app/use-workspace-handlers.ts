@@ -12,7 +12,7 @@ import type {
 } from "./lib/types";
 import { resourceToMaterial, resourceToMaterialSections } from "./lib/types";
 import { seedNotes, seedResources, seedQuestions } from "./lib/default-data";
-import { TASK, MAX_STUDY_DAYS } from "./lib/rules";
+import { TASK, MAX_STUDY_DAYS, MAX_PLAN_LOGS } from "./lib/rules";
 import { savePdfFile, deletePdfFile, saveDocText } from "./lib/pdf-storage";
 import { isDocxFile, isLegacyDocFile, isTextFileType, isImageFileType, extractDocxText, extractTextFileContent } from "./lib/docx-utils";
 import { saveWorkspace, STORAGE_VERSION } from "./lib/storage";
@@ -1516,7 +1516,7 @@ export function useWorkspaceHandlers(deps: HandlerDeps) {
   }
 
   function addLog(input: string, output: string, accepted = "自动生成", dataRead = ["考试日期", "科目状态", "学习历史", "高风险节点"]) {
-    setLogs((items) => [{ id: makeId("l"), time: today(), input, output, accepted, dataRead, userRevision: "待记录", finalResult: output, rating: "未评价", rework: "0" }, ...items]);
+    setLogs((items) => [{ id: makeId("l"), time: today(), input, output, accepted, dataRead, userRevision: "待记录", finalResult: output, rating: "未评价", rework: "0" }, ...items].slice(0, MAX_PLAN_LOGS));
   }
 
   function recordStudyDay(minutes = 0, completedDelta = 0) {

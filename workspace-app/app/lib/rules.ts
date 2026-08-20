@@ -104,14 +104,12 @@ export const STORAGE = {
   legacyKeyV3: "nest-exam-workspace-v3",
   /** 旧 v4 数据 key（迁移源，保留可回滚） */
   legacyKeyV4: "nest-exam-workspace-v4",
-  /** 最多保留的 studyDays 记录数 */
-  maxStudyDays: 140,
 } as const;
 
 // ============================================================
-// studyDay 记录 slice 上限
+// studyDay 记录 slice 上限（覆盖完整备考周期，与热力图跨度 MAX_DATE_RANGE_DAYS 一致）
 // ============================================================
-export const MAX_STUDY_DAYS = 140;
+export const MAX_STUDY_DAYS = 900;
 
 // ============================================================
 // 日期范围计算最大天数

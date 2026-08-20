@@ -36,6 +36,7 @@
 | 你属于… | 看这份 |
 |---|---|
 | 已经有人帮你装好了，只管用 | **[USAGE.md](./USAGE.md) 怎么用**（大白话，30 秒上手） |
+| 想弄懂这套学习方法（7核·4层·6轮） | **[METHODOLOGY.md](./docs/METHODOLOGY.md) 学习方法论** |
 | 想自己装（需要会打开终端、敲命令） | **[INSTALL.md](./INSTALL.md) 安装**（一步步来，Docker / 双击脚本 / 手动三种方式） |
 | 装好了想上线到公网 / 手机随时访问 | **[DEPLOY.md](./DEPLOY.md) 部署** |
 | 交付 / 接手前自检 | **[CHECKLIST.md](./CHECKLIST.md) 交付清单** |
@@ -100,6 +101,7 @@ npx playwright test # E2E（68/68，需 dev server）
 
 - [INSTALL.md](./INSTALL.md) — 安装说明书（三种方式，手把手）
 - [USAGE.md](./USAGE.md) — 使用说明书
+- [METHODOLOGY.md](./docs/METHODOLOGY.md) — 学习方法论（逆向设计 × 7核 × 4层 × 6轮）
 - [DEPLOY.md](./DEPLOY.md) — 部署（本机 / 局域网 / Cloudflare Workers）
 - [CHECKLIST.md](./CHECKLIST.md) — 交付前自检清单
 - [ARCHITECTURE.md](./docs/ARCHITECTURE.md) — 开发者架构

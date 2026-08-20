@@ -16,6 +16,7 @@
 | 你属于… | 看这份 |
 |---|---|
 | 已经有人帮你装好了，只管用 | **[使用说明](./workspace-app/USAGE.md)**（大白话，30 秒上手） |
+| 想弄懂这套学习方法（7核·4层·6轮） | **[学习方法论](./workspace-app/docs/METHODOLOGY.md)** |
 | 想自己装（Docker / 双击脚本 / 手动） | **[安装说明](./workspace-app/INSTALL.md)**（一步步来） |
 | 装好了想上线到公网 / 手机随时访问 | **[部署说明](./workspace-app/DEPLOY.md)** |
 | 交付 / 接手前自检 | **[交付清单](./workspace-app/CHECKLIST.md)** |

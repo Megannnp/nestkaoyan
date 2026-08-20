@@ -8,7 +8,7 @@
 import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { AgentMessage, ChatSession } from "./lib/types";
-import { createChatSession, createMessage, appendMessage } from "./lib/chat";
+import { createChatSession, createMessage, appendMessage, pruneChatSessions } from "./lib/chat";
 import { makeId } from "./lib/utils";
 
 export interface UseChatSessionDeps {
@@ -36,7 +36,7 @@ export function useChatSession(deps: UseChatSessionDeps) {
     let sessionId = activeSessionIdRef.current;
     if (!sessionId) {
       sessionId = makeId("s");
-      setChatSessions((prev) => [createChatSession(sessionId), ...prev]);
+      setChatSessions((prev) => pruneChatSessions([createChatSession(sessionId), ...prev]));
       setActiveSessionId(sessionId);
       activeSessionIdRef.current = sessionId;
     }
@@ -45,7 +45,7 @@ export function useChatSession(deps: UseChatSessionDeps) {
 
   function newChatSession() {
     const sessionId = makeId("s");
-    setChatSessions((prev) => [createChatSession(sessionId), ...prev]);
+    setChatSessions((prev) => pruneChatSessions([createChatSession(sessionId), ...prev]));
     setActiveSessionId(sessionId);
     activeSessionIdRef.current = sessionId;
     setChatHistoryOpen(false);

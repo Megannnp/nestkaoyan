@@ -1,5 +1,6 @@
 import type { AgentMessage, ChatSession } from "./types.ts";
 import { makeId } from "./utils.ts";
+import { CHAT_MAX_MESSAGES_PER_SESSION, CHAT_MAX_SESSIONS } from "./rules.ts";
 
 /**
  * 聊天会话域纯逻辑（从 page.tsx 抽取，便于离线单测与复用，降低上帝组件体积）。
@@ -52,13 +53,22 @@ export function createMessage(
   return { id: mkId("m"), role, content, createdAt: now(), messageType };
 }
 
-/** 往指定 Session 追加一条消息（不可变 reducer；无该 Session 时原样返回） */
+/** 聊天容量上限：裁剪最旧会话与最旧消息，防止工作区 JSON 无界膨胀（会随快照持久化/镜像） */
+export function pruneChatSessions(sessions: ChatSession[]): ChatSession[] {
+  return sessions
+    .slice(0, CHAT_MAX_SESSIONS) // 会话按「新在前」排列，保留最新的 N 个
+    .map((s) => ({ ...s, messages: s.messages.slice(-CHAT_MAX_MESSAGES_PER_SESSION) }));
+}
+
+/** 往指定 Session 追加一条消息（不可变 reducer；无该 Session 时原样返回；追加后统一裁剪容量） */
 export function appendMessage(
   sessions: ChatSession[],
   sessionId: string,
   message: AgentMessage,
 ): ChatSession[] {
-  return sessions.map((s) => s.id === sessionId ? { ...s, messages: [...s.messages, message] } : s);
+  return pruneChatSessions(
+    sessions.map((s) => s.id === sessionId ? { ...s, messages: [...s.messages, message] } : s),
+  );
 }
 
 // ─── Prompt 意图路由（runPrompt 的纯分类部分）───

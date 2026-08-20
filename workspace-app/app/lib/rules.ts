@@ -128,6 +128,9 @@ export const TOOLTIP = {
 } as const;
 
 // ============================================================
-// chat 保留最近消息数
+// chat 容量上限（防工作区 JSON 无限膨胀撑爆 localStorage / 服务端）
 // ============================================================
-export const CHAT_KEEP_LAST = 7;
+/** 单个会话最多保留的消息数（超出裁剪最旧） */
+export const CHAT_MAX_MESSAGES_PER_SESSION = 80;
+/** 最多保留的会话数（超出裁剪最旧） */
+export const CHAT_MAX_SESSIONS = 30;

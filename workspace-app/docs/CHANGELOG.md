@@ -35,7 +35,8 @@
 ### 缺陷修复
 | 修改 | 说明 |
 |------|------|
-| 打字机 interval 泄漏 | `use-chat-session.ts` 清理动画定时器 |
+| 打字机 interval 泄漏 | `use-chat-session.ts`、`use-workspace-handlers.ts` 清理动画定时器 |
+| 聊天容量无上限 | `chat.ts` 每会话 80 条 / 30 会话上限，防止工作区 JSON 撑爆存储 |
 | 多设备新鲜度误报 | 90s 容差（同设备自更新不再弹窗） |
 | 文件下载整体缓冲 | `worker/files.ts` 改为流式透传 |
 | ai-env 导入扩展名 | Node 测试运行器要求 `.ts` 后缀 |
